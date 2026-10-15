@@ -1,7 +1,9 @@
 # home-brain
 
-A personal/family assistant: a markdown vault about us, our kids, cars and house, exposed to Claude
-as an MCP server, with proactive reminders pushed to our phones via ntfy (later phases).
+A self-hosted personal assistant backend: a markdown vault containing the information an AI needs
+to work as an efficient personal assistant, exposed to Claude as an MCP server. Claude searches the
+vault to answer questions and keeps it up to date as you share new information. Later phases add
+proactive reminders pushed to your phone via ntfy.
 
 Sibling project to [home-board](https://github.com/bjornerikmoen2/home-board).
 Architecture and roadmap: [docs/plan.md](docs/plan.md).

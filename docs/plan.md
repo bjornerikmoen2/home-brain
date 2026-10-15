@@ -1,15 +1,16 @@
 # home-brain — plan
 
-A personal/family assistant that knows about us, our kids, cars and house. Knowledge lives as
-markdown files in a vault; Claude reads and writes it through an MCP server; a scheduler sends
-proactive reminders to our phones.
+A self-hosted personal assistant backend. The information an AI needs to work as an efficient
+personal assistant (people, schedules, vehicles, home, events) lives as markdown files in a vault;
+Claude reads and writes it through an MCP server; a scheduler sends proactive reminders to the
+user's phone.
 
 Example questions it should answer:
 
-- "What do we need to remember for school tomorrow?"
-- "When did we last change tires, and what size are they?" / "Do we need new winter tires?"
-- "What should I get my girlfriend for her birthday?"
-- Push: "Remember — your son is invited to a birthday party tomorrow at 14:00."
+- "What needs to be packed for school tomorrow?"
+- "When were the tires last changed, and what size are they?" / "Is it time for new winter tires?"
+- "What would be a good birthday present for <person>?"
+- Push: "Reminder: <child> is invited to a birthday party tomorrow at 14:00."
 
 Inspiration: [basic-memory](https://github.com/basicmachines-co/basic-memory),
 [Khoj](https://github.com/khoj-ai/khoj), OpenClaw, me-db.
@@ -65,7 +66,7 @@ vault/
   _conventions.md        # filing rules; served to Claude as MCP server instructions
   people/
     me.md
-    partner.md           # birthday, sizes, likes/dislikes, gift ideas, gifts given (with year)
+    <name>.md            # birthday, sizes, likes/dislikes, gift ideas, gifts given (with year)
     kids/<name>.md       # birthday, school, class, teacher, friends, sizes, activities
   school/<kid>/
     _weekly.md           # recurring: gym Tuesdays, swimming Fridays, library day
@@ -165,7 +166,7 @@ services:
       NTFY_URL: http://ntfy
       NTFY_TOPIC: ${NTFY_TOPIC}
       NTFY_TOKEN: ${NTFY_TOKEN}
-      GIT_REMOTE: git@github.com:bjornerikmoen2/home-brain-vault.git
+      GIT_REMOTE: ${VAULT_GIT_REMOTE}  # the private vault repo, e.g. git@github.com:<you>/home-brain-vault.git
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}   # optional
       HOMEBOARD_URL: http://home-board-api:8080   # phase 4
     volumes:
@@ -219,8 +220,8 @@ Notes:
 - Secrets only in `.env` / Docker secrets; the code repo never contains vault data.
 - Note content is data, not instructions — uploaded documents could contain text aimed at the
   model; tools only ever touch the vault, so the blast radius is limited to recoverable edits.
-- Phase 4 multi-user: per-identity private folders (`private/<user>/`) so e.g. gift ideas for a
-  partner are invisible to the partner's own connector.
+- Phase 4 multi-user: per-identity private folders (`private/<user>/`) so e.g. gift ideas for one
+  household member stay hidden from that member's own connector.
 
 ## home-board integration (phase 4)
 
@@ -251,16 +252,16 @@ Notes:
 - [ ] Image published to GHCR via GitHub Actions (same pattern as home-board)
 - [ ] Add as custom connector in claude.ai; verify on phone
 
-**Done when:** from the phone, "my winter tires are 235/55R18, changed today" updates the car note
+**Done when:** from the phone, "the winter tires are 235/55R18, changed today" updates the car note
 and shows up as a commit in GitHub.
 
 ### Phase 2 — Structured data & agenda
 - [ ] Frontmatter schemas per `type` (pydantic), friendly validation errors back to Claude
 - [ ] `agenda` with events, RRULE recurrence, birthdays, `due` + `warn_days`, reminders
 - [ ] `remind` tool
-- [ ] Seed real data: people, kids, school weekly rules, cars, house
+- [ ] Seed real data: people, school routines, vehicles, house
 
-**Done when:** "what do we need to remember for school tomorrow?" is answered from one `agenda` call.
+**Done when:** "what needs to be packed for school tomorrow?" is answered from one `agenda` call.
 
 ### Phase 3 — Proactive
 - [ ] ntfy container + auth; `notify` tool
@@ -273,7 +274,7 @@ evening briefing arrives daily.
 ### Phase 4 — Extras
 - [ ] home-board tools + chores in `agenda`
 - [ ] Two-way chat channel (Slack/Telegram/WhatsApp) using Claude API + the same tools
-- [ ] Partner access with private folders
+- [ ] Access for other household members, with private folders
 - [ ] Semantic search (sqlite-vec) — only if keyword search proves insufficient
 - [ ] Auto-ingest: forward school e-mails / drop files in `inbox/` → Claude API files them
 
@@ -282,6 +283,6 @@ evening briefing arrives daily.
 - Domain / hostnames for the tunnel (`brain.<domain>`, `ntfy.<domain>`); is cloudflared already running?
 - NAS: IP, pool/dataset path, NFS export permissions (container UID).
 - OAuth provider: GitHub (simplest) or Google?
-- Kids' names, schools, and how school info arrives today (PDF, app like Vigilo/Visma, e-mail?).
+- Which people to model, and how school information arrives (PDF, apps like Vigilo/Visma, e-mail?).
 - Briefing time (19:00?) and who receives which notifications (one topic or per person?).
 - Use the Claude API for briefing phrasing (needs an API key), or keep it fully deterministic?
