@@ -100,3 +100,7 @@ src/home_brain/
   server.py        FastMCP server and tools
   vault_template/  starter vault
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).

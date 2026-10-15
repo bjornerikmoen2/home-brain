@@ -1,0 +1,17 @@
+# LF everywhere: the code, Dockerfile and starter vault all end up in a Linux container,
+# and the vault notes are edited from several machines.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary
