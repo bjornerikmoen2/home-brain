@@ -1,0 +1,13 @@
+# Personal data never goes in the code repo: the vault is its own private repo.
+/vault/
+/data/
+.env
+
+# Python
+/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+/build/
+/dist/

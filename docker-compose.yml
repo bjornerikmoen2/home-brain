@@ -1,0 +1,24 @@
+name: home-brain
+
+# Phase 0: local only. The port is bound to 127.0.0.1 because there is no auth yet.
+# Phase 1 adds OAuth, the NFS vault mount and the Cloudflare Tunnel (see docs/plan.md).
+
+services:
+  home-brain:
+    build: .
+    image: ghcr.io/bjornerikmoen2/home-brain
+    container_name: home-brain
+    environment:
+      TZ: Europe/Oslo
+      VAULT_PATH: /vault
+      DATA_PATH: /data
+    volumes:
+      - ./vault:/vault
+      - home-brain-data:/data
+    ports:
+      - "127.0.0.1:${HOME_BRAIN_PORT:-8000}:8000"
+    restart: unless-stopped
+
+volumes:
+  home-brain-data:
+    name: home-brain-data
