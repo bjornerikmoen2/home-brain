@@ -19,10 +19,18 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       ALLOWED_USERS: ${ALLOWED_USERS}
     volumes:
-      - vault:/vault
+      # nocopy: otherwise Docker tries to chown the empty NFS share to the image's UID on first
+      # use, which the NAS refuses (or which would leave the wrong owner).
+      - type: volume
+        source: vault
+        target: /vault
+        volume:
+          nocopy: true
       - home-brain-data:/data
     ports:
-      - "${HOME_BRAIN_PORT:-8000}:8000"
+      # Localhost only, for health checks on the host. The tunnel reaches the container over the
+      # proxy network, and ports published on all interfaces would bypass the host firewall.
+      - "127.0.0.1:${HOME_BRAIN_PORT:-8000}:8000"
     restart: unless-stopped
     networks:
       - proxy
@@ -34,7 +42,8 @@ volumes:
     driver: local
     driver_opts:
       type: nfs
-      o: "addr=${NAS_ADDRESS},rw,nfsvers=4.1,hard,timeo=600"
+      # NFSv3 works on TrueNAS CORE and SCALE without extra settings; set NAS_NFS_VERSION=4.1 if NFSv4 is enabled.
+      o: "addr=${NAS_ADDRESS},rw,nfsvers=${NAS_NFS_VERSION:-3},hard,timeo=600"
       device: ":${NAS_VAULT_EXPORT}"
   home-brain-data:
     # Search index and login state. Local disk only: SQLite must not live on NFS.
