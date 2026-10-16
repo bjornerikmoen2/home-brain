@@ -62,6 +62,34 @@ def test_unterminated_or_invalid_frontmatter_raises() -> None:
         fm.parse("---\n- a list\n---\n")
 
 
+def test_impossible_dates_are_a_frontmatter_error() -> None:
+    with pytest.raises(FrontmatterError, match="out of range"):
+        fm.parse("---\ndate: 2026-10-32\n---\n")
+
+
+def test_new_items_are_written_compactly() -> None:
+    meta, body = fm.parse("---\ntype: school-weekly\n---\n")
+    fm.append_to_list(meta, "recurring", [
+        {"rrule": "FREQ=WEEKLY;BYDAY=TH", "time": "18:00", "title": "Scouts", "bring": ["uniform"]},
+    ])
+    fm.merge_patch(meta, {"school_ends": {"mon": "11:55", "fri": "12:50"}, "teachers": ["A", "B"]})
+    out = fm.render(meta, body)
+    assert '  - {rrule: FREQ=WEEKLY;BYDAY=TH, time: "18:00", title: Scouts, bring: [uniform]}\n' in out
+    assert 'school_ends: {mon: "11:55", fri: "12:50"}\n' in out
+    assert "teachers: [A, B]\n" in out
+    again, _ = fm.parse(out)
+    assert fm.to_plain(again)["recurring"][0]["time"] == "18:00"
+
+
+def test_long_or_nested_values_stay_block_style() -> None:
+    meta, _ = fm.parse("---\ntype: vehicle\n---\n")
+    fm.merge_patch(meta, {"insurance": {"company": "If", "coverage": "liability " * 12}})
+    fm.merge_patch(meta, {"tires": {"winter": {"size": "215/70 R16"}, "summer": {"size": "215/70 R16"}}})
+    out = fm.render(meta, "")
+    assert "insurance:\n  company: If\n" in out
+    assert "tires:\n  winter: {size: 215/70 R16}\n  summer: {size: 215/70 R16}\n" in out
+
+
 def test_merge_patch_merges_nested_deletes_null_and_keeps_formatting() -> None:
     meta, body = fm.parse(NOTE)
     fm.merge_patch(meta, {"tires": {"winter": {"tread_mm": 4.0}}, "reg": None, "measured": "2026-10-28"})

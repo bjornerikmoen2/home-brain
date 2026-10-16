@@ -240,7 +240,7 @@ Notes:
 - [x] SQLite FTS5 index with mtime refresh
 - [x] Tools: `search_notes`, `read_note`, `list_notes`, `write_note`, `patch_note`, `move_note`, `delete_note`
 - [x] Smoke-tested over HTTP, stdio and in Docker
-- [ ] Connect from Claude Desktop / Claude Code and try it with real notes
+- [x] Connect from Claude Desktop / Claude Code and try it with real notes
 
 **Done when:** locally, "save this school letter" (photo attached) creates a correct
 `school/<kid>/2026-wNN.md`, and "what's on Thursday?" finds it.
@@ -251,19 +251,25 @@ Notes:
 - [x] `server-docker-compose.yml` with the NFS vault volume; all site values in `.env`
 - [x] Image built and pushed to GHCR via GitHub Actions (same pattern as home-board)
 - [x] Setup guide: [deploy.md](deploy.md)
-- [ ] NAS dataset + NFS share; move the local vault onto it
-- [ ] GitHub OAuth App; Cloudflare Tunnel hostname `brain.<domain>`; deploy
-- [ ] Add as custom connector in claude.ai; verify on phone
+- [x] NAS dataset + NFS share; move the local vault onto it
+- [x] GitHub OAuth App; Cloudflare Tunnel hostname `brain.<domain>`; deploy
+- [x] Add as custom connector in claude.ai; verify on phone
+- [x] SMB share of the same dataset for browsing/editing from Windows (`force user` = vault owner)
 - [ ] Later: debounced push of the vault history to a private `home-brain-vault` repo
 
 **Done when:** from the phone, "the winter tires are 235/55R18, changed today" updates the car note
 and shows up as a commit in GitHub.
 
 ### Phase 2 — Structured data & agenda
-- [ ] Frontmatter schemas per `type` (pydantic), friendly validation errors back to Claude
-- [ ] `agenda` with events, RRULE recurrence, birthdays, `due` + `warn_days`, reminders
-- [ ] `remind` tool
-- [ ] Seed real data: people, school routines, vehicles, house
+- [x] Validation of the agenda keys (`events`, `recurring`, `due`, `reminders`, `birthday`) on every
+      write/patch, with readable errors; only *new* problems block a save (no per-`type` schemas:
+      the shared keys are what the agenda depends on)
+- [x] `agenda` with events, RRULE recurrence, birthdays, `due` + `warn_days`, reminders, school
+      breaks (`break: true`), cancellations (`cancels`), per-person packing lists, and
+      deduplication of routine items repeated as events
+- [x] `remind` tool (stored in `reminders.md`)
+- [x] Compact YAML for new items (one-line flow style, quoted times)
+- [x] Real data seeded by the user; dry-run of `agenda` against the live vault
 
 **Done when:** "what needs to be packed for school tomorrow?" is answered from one `agenda` call.
 

@@ -15,6 +15,7 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
@@ -54,6 +55,8 @@ def parse(text: str) -> tuple[CommentedMap, str]:
         meta = _yaml().load(raw)
     except YAMLError as exc:
         raise FrontmatterError(f"invalid YAML in frontmatter: {exc}") from exc
+    except ValueError as exc:  # e.g. `date: 2026-10-32` looks like a date but isn't one
+        raise FrontmatterError(f"invalid value in frontmatter: {exc} (dates are YYYY-MM-DD)") from exc
     if meta is None:
         return CommentedMap(), body
     if not isinstance(meta, dict):
@@ -95,17 +98,52 @@ def to_plain(value: Any) -> Any:
 
 
 def from_json(value: Any) -> Any:
-    """Prepare JSON input for YAML: ISO date strings become dates so they are written unquoted."""
+    """Prepare JSON input for YAML the way a person would write it.
+
+    ISO dates become real dates (written unquoted), times like 18:00 are quoted (YAML 1.1 tools
+    would read them as numbers), and short flat mappings and lists are written on one line:
+    `- {date: 2026-10-28, time: "18:00", title: Scouts, bring: [uniform]}`.
+    """
     if isinstance(value, dict):
-        return CommentedMap((k, from_json(v)) for k, v in value.items())
+        node = CommentedMap((k, from_json(v)) for k, v in value.items())
+        if all(_is_scalar(v) or _is_flow_list(v) for v in node.values()) and _width(node) <= FLOW_WIDTH:
+            node.fa.set_flow_style()
+        return node
     if isinstance(value, list):
-        return CommentedSeq(from_json(v) for v in value)
+        seq = CommentedSeq(from_json(v) for v in value)
+        if all(_is_scalar(v) for v in seq) and _width(seq) <= FLOW_WIDTH:
+            seq.fa.set_flow_style()
+        return seq
     if isinstance(value, str) and _ISO_DATE.match(value):
         try:
             return dt.date.fromisoformat(value)
         except ValueError:
             return value
+    if isinstance(value, str) and _CLOCK.match(value):
+        return DoubleQuotedScalarString(value)
     return value
+
+
+FLOW_WIDTH = 100
+_CLOCK = re.compile(r"^\d{1,2}:\d{2}$")
+
+
+def _is_scalar(value: Any) -> bool:
+    return not isinstance(value, (dict, list))
+
+
+def _is_flow_list(value: Any) -> bool:
+    """A one-line list; mappings of mappings (tires: {winter: ..., summer: ...}) stay on several lines."""
+    return isinstance(value, CommentedSeq) and bool(value.fa.flow_style())
+
+
+def _width(node: Any) -> int:
+    """Rough length of a node written in flow style."""
+    if isinstance(node, dict):
+        return 2 + sum(len(str(k)) + 2 + _width(v) + 2 for k, v in node.items())
+    if isinstance(node, list):
+        return 2 + sum(_width(v) + 2 for v in node)
+    return len(str(node)) + (2 if isinstance(node, DoubleQuotedScalarString) else 0)
 
 
 def merge_patch(target: dict, patch: dict) -> None:

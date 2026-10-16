@@ -43,21 +43,34 @@ tools. These rules keep it tidy and machine-readable. Edit this file to change h
 | `tags` | Free tags | `tags: [school, gym]` |
 | `who` | Person slug(s) the note is about | `who: ola` |
 | `birthday` | Birth date; repeats yearly | `birthday: 2016-05-12` |
-| `events` | Dated items: `date`, optional `end_date`, `time`, `title`, `who`, `where`, `bring`, `notes` | see below |
-| `recurring` | Repeating items: `rrule` (RFC 5545), `title`, `who`, `bring`, optional `from`/`until` | `rrule: "FREQ=WEEKLY;BYDAY=TU"` |
-| `due` | Deadlines: `date`, `title`, `warn_days` (how early to warn) | EU-kontroll, insurance |
-| `reminders` | Explicit reminders: `at` (date-time), `text`, optional `who` | |
+| `events` | Dated items: `date`, `title`, optional `end_date`, `time`, `end_time`, `who`, `where`, `bring`, `notes`, `cancels`, `break` | see below |
+| `recurring` | Routine items: `rrule` (RFC 5545), `title`, optional `who`, `time`, `end_time`, `where`, `bring`, `from`, `until`, `exdates` | `rrule: "FREQ=WEEKLY;BYDAY=TU"` |
+| `due` | Deadlines: `date`, `title`, `warn_days` (how early to warn, default 14), `done` | EU-kontroll, insurance |
+| `reminders` | One-off reminders: `at` (date or date-time), `text`, optional `who`, `done`. Add them with the `remind` tool | |
 
 ```yaml
 events:
   - {date: 2026-10-21, title: Forest trip, who: ola, bring: [packed lunch, rain gear]}
+  - {date: 2026-10-22, title: Swimming cancelled, cancels: Swimming}
+  - {date: 2026-12-21, end_date: 2027-01-01, title: Christmas break, break: true}
 recurring:
   - {rrule: "FREQ=WEEKLY;BYDAY=TU", title: Gym, who: ola, bring: [gym clothes, indoor shoes]}
+  - {rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", from: 2026-10-05, title: Paper bin out}
 due:
   - {date: 2027-03-01, title: EU-kontroll, warn_days: 60}
 reminders:
-  - {at: "2026-10-22T18:00", text: Buy a present for Emil's party}
+  - {at: "2026-10-22T18:00", text: Buy a present for Per's party}
 ```
+
+How the `agenda` tool reads them:
+- `who` on an item falls back to the note's own `who`.
+- **`cancels`**: on that day, routine items for the same person whose title contains this word
+  are skipped.
+- **`break: true`** with an `end_date` (school holidays): routine items from the same folder are
+  skipped for the whole period.
+- A routine whose dates depend on its start (every other week, `COUNT`, monthly without a day)
+  needs `from`. `exdates` lists single days to skip.
+- Invalid dates are refused when saving, and reported by `agenda` when found in older notes.
 
 ## Recipes
 
@@ -66,11 +79,16 @@ reminders:
 2. Create `school/<child>/YYYY-wNN.md` with `type: school-week`, `who`, `week: 2026-W43` and an
    `events` item for every dated thing (trips, tests, special clothing, cancelled lessons, things to
    bring). Put homework and the teacher's message in the body.
-3. If the letter changes the regular routine, update `_weekly.md` too.
+3. Don't repeat routine items as events; if the letter says a routine lesson is cancelled, add an
+   event with `cancels`. If it changes the regular routine, update `_weekly.md` instead.
+4. School holidays go in `_weekly.md` as events with `break: true` and an `end_date`.
 
 **"What do we need to remember for school tomorrow?"**
-Combine the child's `_weekly.md` recurring items for that weekday with the `events` for that date
-in the current week's note, plus `events/` notes for that date.
+Call `agenda` with `start: tomorrow`: it combines the routine, that week's events, breaks and
+cancellations, and lists what each child needs to bring. Read its `sources` for homework details.
+
+**"Remind me ..."**
+Use the `remind` tool; the reminder is stored in `reminders.md` and shows up in `agenda`.
 
 **Tires and car service**
 Keep current tire facts in the vehicle's `tires` frontmatter (size, bought, tread depth and when it

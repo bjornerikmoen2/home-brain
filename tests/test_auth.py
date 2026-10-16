@@ -94,7 +94,7 @@ def signed_in_as(monkeypatch: pytest.MonkeyPatch):
 async def test_allowed_user_sees_and_uses_tools(github_settings: Settings, signed_in_as) -> None:
     signed_in_as("allowed-user")
     async with Client(create_server(github_settings)) as client:
-        assert len(await client.list_tools()) == 7
+        assert len(await client.list_tools()) == 9
         result = await client.call_tool("read_note", {"path": "people/kari.md"})
         assert result.structured_content["path"] == "people/kari.md"
 

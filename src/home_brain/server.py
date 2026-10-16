@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated, Any
@@ -11,10 +12,13 @@ from typing import Annotated, Any
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
+from ruamel.yaml.comments import CommentedMap
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-from . import __version__
+from . import __version__, frontmatter
+from .agenda import Note, as_date, as_moment
+from .agenda import build as build_agenda
 from .auth import build_auth
 from .config import Settings
 from .gitsync import GitError, VaultGit
@@ -29,8 +33,35 @@ INTRO = """\
 home-brain is this family's long-term memory: markdown notes about the people, the kids' school,
 cars, house and events. Search it before answering questions about the family, and save new facts
 the user shares. Prefer updating an existing note (patch_note) over creating a duplicate.
+For anything about dates ("what's on tomorrow?", "what do the kids need for school?", "upcoming
+birthdays or deadlines?") call `agenda` first; save reminders with `remind`.
 The vault's filing conventions follow; read them again with read_note('_conventions.md') if needed.
 """
+
+REMINDERS = "reminders.md"
+REMINDERS_BODY = "\n# Reminders\n\nOne-off reminders saved with the remind tool. Mark old ones `done: true` or delete them.\n"
+
+
+def today() -> dt.date:
+    return dt.date.today()
+
+
+def now() -> dt.datetime:
+    return dt.datetime.now()
+
+
+def _parse_day(text: str) -> dt.date:
+    word = text.strip().lower()
+    if word in ("today", ""):
+        return today()
+    if word == "tomorrow":
+        return today() + dt.timedelta(days=1)
+    if word == "yesterday":
+        return today() - dt.timedelta(days=1)
+    day = as_date(word)
+    if day is None or len(word) != 10:
+        raise VaultError("start must be 'today', 'tomorrow' or a date like 2026-10-21")
+    return day
 
 READ_ONLY = {"readOnlyHint": True, "openWorldHint": False}
 EDIT = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}
@@ -203,6 +234,68 @@ def create_server(settings: Settings) -> FastMCP:
             rel, trashed = vault.delete(path)
         index.refresh(force=True)
         return {"path": rel, "trashed_to": trashed}
+
+    @mcp.tool(annotations=READ_ONLY)
+    def agenda(
+        start: Annotated[str, Field(description="First day: 'today', 'tomorrow' or a date like 2026-10-21.")] = "today",
+        days: Annotated[int, Field(ge=1, le=366, description="How many days from `start`: 1 = just that day, 7 = a week.")] = 1,
+        who: Annotated[str | None, Field(description="Only items for this person (note slug, e.g. 'ola').")] = None,
+        folder: Annotated[str, Field(description="Only notes under this folder, e.g. 'school'.")] = "",
+    ) -> dict[str, Any]:
+        """Everything dated in the vault for one or more days, grouped by day: events, weekly routines
+        (`recurring`), birthdays, deadlines (`due`) and reminders, with a per-person `bring` list for
+        each day. Also returns deadlines coming up within their `warn_days` or recently missed
+        (`upcoming`), and invalid dates it had to skip (`problems`; fix them with patch_note).
+
+        Call it first for questions like "what do the kids need for school tomorrow?", "what's on this
+        week?" (days=7) or "any birthdays coming up?" (days=60). Read the `sources` notes for details
+        such as homework or school hours.
+
+        Routine items are skipped on days covered by an event with `break: true` and an `end_date` in
+        the same folder (school holidays), and on days with an event whose `cancels` text appears in
+        their title (e.g. an event {date: ..., title: PE cancelled, cancels: PE}).
+        """
+        with _tool_errors():
+            first = _parse_day(start)
+            folder_rel = vault.folder_path(folder)[0]
+        notes = [Note(path, title, meta) for path, title, meta in index.frontmatter(folder_rel)]
+        return build_agenda(notes, first, first + dt.timedelta(days=days - 1), today(), who)
+
+    @mcp.tool(annotations=EDIT)
+    def remind(
+        at: Annotated[str, Field(description='When: "YYYY-MM-DDTHH:MM" (local time) or just "YYYY-MM-DD".')],
+        text: Annotated[str, Field(description="The reminder, written so it makes sense on its own.")],
+        who: Annotated[str | None, Field(description="Person it concerns (note slug, e.g. 'ola').")] = None,
+        note: Annotated[str, Field(description="Note to store it in; reminders.md unless it belongs with an event note.")] = REMINDERS,
+    ) -> dict[str, Any]:
+        """Save a one-off reminder ("remind me to buy a present on Thursday at 18:00"). It is stored
+        under `reminders` in the note and shows up in `agenda` on its day.
+        """
+        with _tool_errors():
+            moment = as_moment(at)
+            if moment is None or (len(at.strip()) > 10 and moment[1] is None):
+                raise VaultError('at must be "YYYY-MM-DDTHH:MM" or "YYYY-MM-DD"')
+            day, clock = moment
+            if day < today() or (clock and dt.datetime.combine(day, dt.time.fromisoformat(clock)) < now()):
+                raise VaultError(f"{at} is in the past")
+            if not text.strip():
+                raise VaultError("text is empty")
+            reminder: dict[str, Any] = {
+                "id": f"r-{secrets.token_hex(4)}",
+                "at": f"{day.isoformat()}T{clock}" if clock else day.isoformat(),
+                "text": text.strip(),
+            }
+            if who:
+                reminder["who"] = who.strip().lstrip("@").lower()
+            reminder["created"] = today().isoformat()
+            rel, full = vault.note_path(note)
+            if full.exists():
+                vault.patch(rel, append_to_list={"reminders": [reminder]})
+            else:
+                meta = CommentedMap(type="reminders", reminders=frontmatter.from_json([reminder]))
+                vault.write(rel, frontmatter.render(meta, REMINDERS_BODY))
+        index.refresh(force=True)
+        return {"path": rel, "reminder": reminder}
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> PlainTextResponse:

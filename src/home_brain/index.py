@@ -225,6 +225,14 @@ class Index:
         ]
         return {"folder": folder, "subfolders": subfolders, "notes": notes, "truncated": len(rows) > limit}
 
+    def frontmatter(self, folder: str = "") -> list[tuple[str, str, dict[str, Any]]]:
+        """(path, title, frontmatter) of every note under a folder, for the agenda."""
+        self.refresh()
+        sql, params = _filters("SELECT path, title, frontmatter FROM notes n WHERE 1 = 1", [], folder, None)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY path", params).fetchall()
+        return [(r["path"], r["title"], json.loads(r["frontmatter"])) for r in rows]
+
     def count(self) -> int:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0]

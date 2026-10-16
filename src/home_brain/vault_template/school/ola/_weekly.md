@@ -9,7 +9,7 @@ recurring:
   - {rrule: "FREQ=WEEKLY;BYDAY=TH", title: Swimming, bring: [swimsuit, towel]}
   - {rrule: "FREQ=WEEKLY;BYDAY=FR", title: Library day, bring: [library book]}
 events:
-  - {date: 2026-12-21, end_date: 2027-01-01, title: Christmas break}
+  - {date: 2026-12-21, end_date: 2027-01-01, title: Christmas break, break: true}
 ---
 
 # Ola – weekly school routine

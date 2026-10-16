@@ -19,7 +19,7 @@ tags: [kid]
 - Lego, football, dinosaurs
 
 ## Friends
-- Emil (birthday party 2026-10-24)
+- Per (birthday party 2026-10-24)
 
 ## Log
 - 2026-08-18: Started 4th grade.

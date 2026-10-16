@@ -20,7 +20,7 @@ from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
-from . import frontmatter
+from . import agenda, frontmatter
 from .frontmatter import FrontmatterError
 
 TRASH_DIR = ".trash"
@@ -122,7 +122,7 @@ class Vault:
         if not content.endswith("\n"):
             content += "\n"
         try:
-            frontmatter.parse(content)
+            meta, _ = frontmatter.parse(content)
         except FrontmatterError as exc:
             raise VaultError(str(exc)) from exc
         with self._lock:
@@ -133,6 +133,8 @@ class Vault:
                 )
             if exists and not full.is_file():
                 raise VaultError(f"{rel} is a folder")
+            before = _problems(full.read_text(encoding="utf-8")) if exists else []
+            _reject_new_problems(rel, before, agenda.check(frontmatter.to_plain(meta)))
             _atomic_write(full, content)
             self._changed([rel], f"{'Replace' if exists else 'Create'} {rel}")
         return rel, not exists
@@ -153,12 +155,14 @@ class Vault:
             rel, text, _ = self.read(path)
             try:
                 meta, body = frontmatter.parse(text)
+                before = agenda.check(frontmatter.to_plain(meta))
                 if set_frontmatter:
                     frontmatter.merge_patch(meta, set_frontmatter)
                 for key_path, items in (append_to_list or {}).items():
                     frontmatter.append_to_list(meta, key_path, items)
             except FrontmatterError as exc:
                 raise VaultError(f"{rel}: {exc}") from exc
+            _reject_new_problems(rel, before, agenda.check(frontmatter.to_plain(meta)))
             if append_text:
                 body = frontmatter.append_text(body, append_text, under_heading)
             if set_frontmatter or append_to_list:
@@ -215,6 +219,20 @@ class Vault:
 
     def is_empty(self) -> bool:
         return not self.root.exists() or not any(self.root.iterdir())
+
+
+def _problems(text: str) -> list[str]:
+    try:
+        return agenda.check(frontmatter.to_plain(frontmatter.parse(text)[0]))
+    except FrontmatterError:
+        return []
+
+
+def _reject_new_problems(rel: str, before: list[str], after: list[str]) -> None:
+    """Refuse a change that adds invalid agenda data; problems the note already had don't block it."""
+    new = [p for p in after if p not in before]
+    if new:
+        raise VaultError(f"{rel}: not saved, the frontmatter has problems:\n" + "\n".join(f"- {p}" for p in new))
 
 
 def _walk_template(node: Traversable, prefix: str = "") -> Iterator[tuple[str, Traversable]]:

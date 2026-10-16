@@ -8,9 +8,9 @@ proactive reminders pushed to your phone via ntfy.
 Sibling project to [home-board](https://github.com/bjornerikmoen2/home-board).
 Architecture and roadmap: [docs/plan.md](docs/plan.md).
 
-**Status:** Phase 1 (in progress). Note tools, search and per-change git history work locally;
-GitHub login, the NAS vault and the Cloudflare Tunnel deployment are ready to set up with
-[docs/deploy.md](docs/deploy.md). Pushing the vault history to GitHub comes later.
+**Status:** Phase 2. Running on a home server behind GitHub login and a Cloudflare Tunnel
+([docs/deploy.md](docs/deploy.md)), with the vault on a NAS and one git commit per change. The
+`agenda` and `remind` tools answer date questions; notifications (Phase 3) come next.
 
 ## Quick start (local, Windows)
 
@@ -67,6 +67,12 @@ see [docs/deploy.md](docs/deploy.md).
 | `patch_note` | Merge frontmatter (JSON merge patch), append to frontmatter lists, append text under a heading; preserves comments and formatting |
 | `move_note` | Rename/refile a note, never overwrites |
 | `delete_note` | Soft delete into `.trash/` |
+| `agenda` | Everything dated for one or more days: events, weekly routines (RRULE), birthdays, deadlines and reminders, with a per-person packing list; plus upcoming deadlines within their warning window |
+| `remind` | Save a one-off reminder in `reminders.md` |
+
+Dates in `events`, `recurring`, `due`, `reminders` and `birthday` are validated when a note is
+saved; see the vault's `_conventions.md` for the fields, including `cancels` (skip a routine item
+on one day) and `break: true` (school holidays).
 
 The server's instructions to Claude are the contents of the vault's `_conventions.md`, so editing
 that file (and restarting) changes how Claude files things.
@@ -111,6 +117,7 @@ Commands: `home-brain serve [--transport http|stdio] [--host H] [--port P]`, `ho
 ```
 src/home_brain/
   frontmatter.py   parse/render notes, merge patch, list append, append under heading (ruamel.yaml, YAML 1.2)
+  agenda.py        dated items: validation, RRULE expansion, birthdays, deadlines, breaks and cancellations
   vault.py         path safety, atomic writes, move, soft delete, starter template
   index.py         SQLite FTS5 index, refreshed by mtime scan (works on NFS)
   gitsync.py       vault git history: one commit per change, outside edits included

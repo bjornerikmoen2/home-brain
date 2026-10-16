@@ -79,6 +79,25 @@ def test_patch_updates_frontmatter_lists_and_log(vault: Vault) -> None:
     assert text.rstrip().endswith("- 2026-10-28: Changed to winter tires. Tread 4.0 mm.")
 
 
+def test_writes_refuse_invalid_agenda_data(vault: Vault) -> None:
+    with pytest.raises(VaultError, match=r"events\[0\]\.date: 'next friday' is not a date"):
+        vault.write("events/bad.md", "---\nevents:\n  - {date: next friday, title: Party}\n---\n")
+    assert not (vault.root / "events" / "bad.md").exists()
+    with pytest.raises(VaultError, match="out of range"):
+        vault.write("events/bad.md", "---\nevents:\n  - {date: 2026-10-32, title: Party}\n---\n")
+    vault.write("events/ok.md", "---\ntype: event\n---\n")
+    with pytest.raises(VaultError, match=r"recurring\[0\]\.rrule: needs FREQ"):
+        vault.patch("events/ok.md", append_to_list={"recurring": [{"rrule": "every tuesday", "title": "x"}]})
+
+
+def test_existing_problems_do_not_block_unrelated_edits(vault: Vault) -> None:
+    (vault.root / "inbox" / "old.md").write_text("---\nbirthday: someday\n---\n", encoding="utf-8")
+    vault.patch("inbox/old.md", set_frontmatter={"tags": ["x"]})
+    vault.write("inbox/old.md", "---\nbirthday: someday\ntags: [y]\n---\n", overwrite=True)
+    with pytest.raises(VaultError, match=r"due\[0\]\.date"):
+        vault.patch("inbox/old.md", append_to_list={"due": [{"date": "soon", "title": "x"}]})
+
+
 def test_patch_needs_a_change_and_an_existing_note(vault: Vault) -> None:
     with pytest.raises(VaultError, match="nothing to change"):
         vault.patch("people/kari.md")

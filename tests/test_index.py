@@ -23,7 +23,7 @@ def test_indexes_the_starter_vault(vault: Vault, index: Index) -> None:
         ("forest trip", "school/ola/2026-w43.md"),  # body + frontmatter
         ("235/55R18", "vehicles/family-car.md"),  # frontmatter value
         ("pottery", "people/kari.md"),
-        ("Emil party", "events/2026-10-24-emil-birthday-party.md"),
+        ("Per party", "events/2026-10-24-per-birthday-party.md"),
         ("ventilation filter", "house/house.md"),
     ],
 )
@@ -45,7 +45,7 @@ def test_search_skips_conventions_but_list_shows_it(index: Index) -> None:
 
 def test_search_filters(index: Index) -> None:
     assert set(paths(index.search("ola", folder="school"))) == {"school/ola/_weekly.md", "school/ola/2026-w43.md"}
-    assert paths(index.search("ola", note_type="event")) == ["events/2026-10-24-emil-birthday-party.md"]
+    assert paths(index.search("ola", note_type="event")) == ["events/2026-10-24-per-birthday-party.md"]
     assert index.search("ola", folder="vehicles") == []
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import AsyncIterator
 
 import pytest
@@ -10,7 +11,10 @@ from home_brain.config import Settings
 from home_brain.server import build_instructions, create_server
 from home_brain.vault import Vault
 
-TOOLS = {"search_notes", "read_note", "list_notes", "write_note", "patch_note", "move_note", "delete_note"}
+TOOLS = {
+    "search_notes", "read_note", "list_notes", "write_note", "patch_note", "move_note", "delete_note",
+    "agenda", "remind",
+}
 
 
 @pytest.fixture
@@ -79,6 +83,62 @@ async def test_move_and_delete_tools(client: Client) -> None:
     deleted = await call(client, "delete_note", path="vehicles/tire-quote.md")
     assert deleted["trashed_to"].endswith("/vehicles/tire-quote.md")
     assert (await call(client, "search_notes", query="dekktilbud"))["results"] == []
+
+
+@pytest.fixture
+def frozen_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("home_brain.server.today", lambda: dt.date(2026, 10, 19))
+    monkeypatch.setattr("home_brain.server.now", lambda: dt.datetime(2026, 10, 19, 12, 0))
+
+
+async def test_agenda_tool_on_the_starter_vault(client: Client, frozen_time: None) -> None:
+    tomorrow = await call(client, "agenda", start="tomorrow")
+    assert tomorrow["today"] == "2026-10-19"
+    day = tomorrow["days"][0]
+    assert (day["date"], day["weekday"]) == ("2026-10-20", "Tuesday")
+    assert [i["title"] for i in day["items"]] == ["Gym"]
+    assert day["bring"] == {"ola": ["gym clothes", "indoor shoes"]}
+
+    week = await call(client, "agenda", start="2026-10-19", days=7)
+    by_day = {d["date"]: [i["title"] for i in d["items"]] for d in week["days"]}
+    assert by_day["2026-10-22"] == ["Swimming cancelled", "Buy a present for Per's party (budget 200 kr)"]
+    assert by_day["2026-10-24"] == ["Per's birthday party"]
+    assert [i["title"] for i in week["upcoming"]] == ["Change ventilation filter"]
+
+    birthdays = await call(client, "agenda", start="today", days=30, who="kari")
+    assert [i["title"] for d in birthdays["days"] for i in d["items"]] == ["Kari Nordmann's birthday (turns 38)"]
+
+
+async def test_agenda_tool_rejects_bad_start(client: Client) -> None:
+    with pytest.raises(ToolError, match="start must be"):
+        await client.call_tool("agenda", {"start": "next week"})
+
+
+async def test_remind_tool(client: Client, settings: Settings, frozen_time: None) -> None:
+    first = await call(client, "remind", at="2026-10-20T19:00", text="Pack gym clothes", who="Ola")
+    assert first["path"] == "reminders.md"
+    assert first["reminder"]["who"] == "ola"
+    assert first["reminder"]["id"].startswith("r-")
+    await call(client, "remind", at="2026-10-21", text="Forest trip: rain gear")
+    text = (settings.vault_path / "reminders.md").read_text(encoding="utf-8")
+    assert text.startswith("---\ntype: reminders\nreminders:\n  - {id: r-")
+    assert text.count("  - {id: r-") == 2
+    day = (await call(client, "agenda", start="2026-10-20"))["days"][0]
+    assert {"title": "Pack gym clothes", "time": "19:00"}.items() <= next(i for i in day["items"] if i["kind"] == "reminder").items()
+
+
+@pytest.mark.parametrize(
+    ("at", "message"),
+    [
+        ("2026-10-19T11:00", "in the past"),
+        ("2026-10-18", "in the past"),
+        ("next week", "at must be"),
+        ("2026-10-20T25:00", "at must be"),
+    ],
+)
+async def test_remind_rejects_bad_times(client: Client, frozen_time: None, at: str, message: str) -> None:
+    with pytest.raises(ToolError, match=message):
+        await client.call_tool("remind", {"at": at, "text": "x"})
 
 
 async def test_empty_search_gives_a_hint(client: Client) -> None:
