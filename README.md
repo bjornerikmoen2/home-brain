@@ -8,8 +8,9 @@ proactive reminders pushed to your phone via ntfy.
 Sibling project to [home-board](https://github.com/bjornerikmoen2/home-board).
 Architecture and roadmap: [docs/plan.md](docs/plan.md).
 
-**Status:** Phase 0 — local MVP. Vault, search index and note tools work over stdio and HTTP.
-There is no authentication yet, so only run it on localhost.
+**Status:** Phase 1 (in progress). Note tools, search and per-change git history work locally;
+GitHub login, the NAS vault and the Cloudflare Tunnel deployment are ready to set up with
+[docs/deploy.md](docs/deploy.md). Pushing the vault history to GitHub comes later.
 
 ## Quick start (local, Windows)
 
@@ -23,8 +24,9 @@ The MCP endpoint is `http://127.0.0.1:8000/mcp` (health check: `/health`). On fi
 vault is seeded from the starter template: example notes about "Ola" and "Kari Nordmann" marked
 `example: true`, plus `_conventions.md` with the filing rules. Replace the examples with real notes.
 
-`./vault` and `./data` are git-ignored. Personal data never goes in this repo; in Phase 1 the vault
-becomes its own private repo on the NAS.
+The vault is its own git repository (created on first start) with one commit per change, so
+anything Claude does can be undone. `./vault` and `./data` are git-ignored here: personal data
+never goes in this repo.
 
 ## Connect Claude
 
@@ -51,7 +53,8 @@ claude mcp add --transport http home-brain http://127.0.0.1:8000/mcp
 }
 ```
 
-The Claude app on the web and phone needs a public HTTPS URL with OAuth. That is Phase 1.
+The Claude app on the web and phone needs the server on a public HTTPS URL with GitHub login:
+see [docs/deploy.md](docs/deploy.md).
 
 ## Tools
 
@@ -75,15 +78,26 @@ docker compose up -d --build
 ```
 
 Serves on `127.0.0.1:${HOME_BRAIN_PORT:-8000}` with `./vault` bind-mounted and the index in the
-`home-brain-data` volume. The container runs as UID 1000.
+`home-brain-data` volume, without login (local testing only). The container runs as UID 1000.
+
+For the real deployment (NAS vault over NFS, GitHub login, Cloudflare Tunnel) use
+`server-docker-compose.yml` and follow [docs/deploy.md](docs/deploy.md). GitHub Actions builds
+`ghcr.io/bjornerikmoen2/home-brain` on every push to `main`.
 
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `VAULT_PATH` | `vault` | Vault root folder |
-| `DATA_PATH` | `data` | Search index and state. Keep it on a local disk, not NFS |
+| `DATA_PATH` | `data` | Search index and login state. Keep it on a local disk, not NFS |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | HTTP bind address |
+| `VAULT_GIT` | `true` | Keep the vault in git, one commit per change |
+| `VAULT_GIT_AUTHOR_NAME` / `_EMAIL` | `home-brain` / `home-brain@localhost` | Author of those commits |
+| `AUTH_PROVIDER` | `none` | `github` turns on GitHub login (HTTP only; stdio never needs it) |
+| `PUBLIC_URL` | | Public HTTPS address, e.g. `https://brain.example.com` |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | | GitHub OAuth App credentials |
+| `ALLOWED_USERS` | | Comma-separated GitHub logins allowed to use the server |
+| `OAUTH_JWT_SIGNING_KEY` | derived from the client secret | Key for the tokens home-brain issues to Claude |
 
 Commands: `home-brain serve [--transport http|stdio] [--host H] [--port P]`, `home-brain init`
 (copy missing starter files into the vault, never overwrites), `home-brain reindex`.
@@ -99,6 +113,9 @@ src/home_brain/
   frontmatter.py   parse/render notes, merge patch, list append, append under heading (ruamel.yaml, YAML 1.2)
   vault.py         path safety, atomic writes, move, soft delete, starter template
   index.py         SQLite FTS5 index, refreshed by mtime scan (works on NFS)
+  gitsync.py       vault git history: one commit per change, outside edits included
+  auth.py          GitHub OAuth (FastMCP OAuth proxy) and the ALLOWED_USERS check
+  config.py        settings from environment variables, with validation
   server.py        FastMCP server and tools
   vault_template/  starter vault
 ```

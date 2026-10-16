@@ -15,7 +15,9 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from . import __version__
+from .auth import build_auth
 from .config import Settings
+from .gitsync import GitError, VaultGit
 from .index import Index
 from .vault import Vault, VaultError
 
@@ -52,16 +54,43 @@ def build_instructions(vault: Vault) -> str:
     return f"{INTRO}\n{conventions}"
 
 
+def open_vault(settings: Settings) -> Vault:
+    """The vault, with a git commit after every change unless versioning is off or unavailable."""
+    if not settings.vault_git:
+        return Vault(settings.vault_path)
+    if not VaultGit.available():
+        log.warning("git is not installed; vault changes will not be versioned")
+        return Vault(settings.vault_path)
+    git = VaultGit(settings.vault_path, settings.git_author_name, settings.git_author_email)
+    try:
+        git.ensure_repo()
+    except GitError:
+        log.exception("could not set up git in %s; vault changes will not be versioned", settings.vault_path)
+        return Vault(settings.vault_path)
+
+    def commit(paths: list[str], description: str) -> None:
+        # The note is already saved; a failed commit must not fail the tool call.
+        try:
+            git.commit(paths, description)
+        except GitError:
+            log.exception("git commit failed for %s", ", ".join(paths))
+
+    return Vault(settings.vault_path, on_change=commit)
+
+
 def create_server(settings: Settings) -> FastMCP:
-    vault = Vault(settings.vault_path)
+    vault = open_vault(settings)
     index = Index(vault, settings.data_path / "index.db")
     stats = index.refresh(force=True)
     log.info("vault %s: %d notes indexed (%s)", vault.root, index.count(), stats)
 
+    auth, middleware = build_auth(settings)
     mcp = FastMCP(
         name="home-brain",
         instructions=build_instructions(vault),
         version=__version__,
+        auth=auth,
+        middleware=middleware,
         mask_error_details=True,
     )
 

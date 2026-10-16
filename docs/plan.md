@@ -246,11 +246,15 @@ Notes:
 `school/<kid>/2026-wNN.md`, and "what's on Thursday?" finds it.
 
 ### Phase 1 — In the Claude app
-- [ ] FastMCP OAuth proxy (GitHub or Google) + allowlist
-- [ ] Cloudflare Tunnel hostname `brain.<domain>`
-- [ ] Vault on the NAS via NFS; git commit per write; debounced push to `home-brain-vault`
-- [ ] Image published to GHCR via GitHub Actions (same pattern as home-board)
+- [x] FastMCP OAuth proxy (GitHub, `read:user` only) + `ALLOWED_USERS` check on every tool list/call
+- [x] Git commit per write in the vault (outside edits included in the next commit)
+- [x] `server-docker-compose.yml` with the NFS vault volume; all site values in `.env`
+- [x] Image built and pushed to GHCR via GitHub Actions (same pattern as home-board)
+- [x] Setup guide: [deploy.md](deploy.md)
+- [ ] NAS dataset + NFS share; move the local vault onto it
+- [ ] GitHub OAuth App; Cloudflare Tunnel hostname `brain.<domain>`; deploy
 - [ ] Add as custom connector in claude.ai; verify on phone
+- [ ] Later: debounced push of the vault history to a private `home-brain-vault` repo
 
 **Done when:** from the phone, "the winter tires are 235/55R18, changed today" updates the car note
 and shows up as a commit in GitHub.

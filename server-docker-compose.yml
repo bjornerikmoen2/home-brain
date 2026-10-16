@@ -1,0 +1,45 @@
+name: home-brain
+
+# Production: the vault on the NAS over NFS, GitHub login, reached through the Cloudflare Tunnel.
+# All site-specific values come from .env (see .env.example); docs/deploy.md walks through setup.
+
+services:
+  home-brain:
+    image: ghcr.io/bjornerikmoen2/home-brain:latest
+    container_name: home-brain
+    # Must be able to write the NFS share; match the owner of the NAS dataset.
+    user: "${HOME_BRAIN_UID:-1000}:${HOME_BRAIN_GID:-1000}"
+    environment:
+      TZ: Europe/Oslo
+      VAULT_PATH: /vault
+      DATA_PATH: /data
+      PUBLIC_URL: ${PUBLIC_URL}
+      AUTH_PROVIDER: github
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      ALLOWED_USERS: ${ALLOWED_USERS}
+    volumes:
+      - vault:/vault
+      - home-brain-data:/data
+    ports:
+      - "${HOME_BRAIN_PORT:-8000}:8000"
+    restart: unless-stopped
+    networks:
+      - proxy
+
+volumes:
+  vault:
+    # Compose creates this once; after changing NAS_* run `docker volume rm home-brain-vault`.
+    name: home-brain-vault
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${NAS_ADDRESS},rw,nfsvers=4.1,hard,timeo=600"
+      device: ":${NAS_VAULT_EXPORT}"
+  home-brain-data:
+    # Search index and login state. Local disk only: SQLite must not live on NFS.
+    name: home-brain-data
+
+networks:
+  proxy:
+    external: true

@@ -13,7 +13,7 @@ import os
 import re
 import tempfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from importlib.resources import files
 from importlib.resources.abc import Traversable
@@ -41,10 +41,19 @@ class NoteFile:
     size: int
 
 
+ChangeHook = Callable[[list[str], str], None]
+"""Called with (changed vault paths, description) after each change, while the vault is locked."""
+
+
 class Vault:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, on_change: ChangeHook | None = None) -> None:
         self.root = Path(root).resolve()
         self._lock = threading.RLock()
+        self._on_change = on_change
+
+    def _changed(self, paths: list[str], description: str) -> None:
+        if self._on_change is not None:
+            self._on_change(paths, description)
 
     # --- paths -------------------------------------------------------------
 
@@ -125,6 +134,7 @@ class Vault:
             if exists and not full.is_file():
                 raise VaultError(f"{rel} is a folder")
             _atomic_write(full, content)
+            self._changed([rel], f"{'Replace' if exists else 'Create'} {rel}")
         return rel, not exists
 
     def patch(
@@ -156,6 +166,7 @@ class Vault:
             else:  # body-only edit: don't let the YAML dumper reformat the frontmatter
                 new_text = frontmatter.replace_body(text, body)
             _atomic_write(self.note_path(rel)[1], new_text)
+            self._changed([rel], f"Update {rel}")
         return rel, frontmatter.to_plain(meta)
 
     def move(self, path: str, new_path: str) -> tuple[str, str]:
@@ -169,6 +180,7 @@ class Vault:
                 raise VaultError(f"{dst_rel} already exists")
             dst.parent.mkdir(parents=True, exist_ok=True)
             src.rename(dst)
+            self._changed([src_rel, dst_rel], f"Move {src_rel} to {dst_rel}")
         return src_rel, dst_rel
 
     def delete(self, path: str) -> tuple[str, str]:
@@ -181,6 +193,7 @@ class Vault:
             trashed = self.root / TRASH_DIR / stamp / rel
             trashed.parent.mkdir(parents=True, exist_ok=True)
             full.rename(trashed)
+            self._changed([rel], f"Delete {rel}")
         return rel, f"{TRASH_DIR}/{stamp}/{rel}"
 
     # --- starter template --------------------------------------------------

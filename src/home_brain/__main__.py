@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import sys
 
-from .config import Settings
+from .config import ConfigError, Settings
 from .index import Index
 from .vault import Vault
 
@@ -28,7 +29,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     # stdout belongs to the MCP protocol in stdio mode, so always log to stderr.
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    settings = Settings.from_env()
+    try:
+        settings = Settings.from_env()
+    except ConfigError as exc:
+        sys.exit(f"home-brain: configuration error: {exc}")
 
     if args.command == "init":
         copied = Vault(settings.vault_path).seed()
@@ -48,10 +52,14 @@ def _serve(settings: Settings, args: argparse.Namespace) -> None:
         copied = vault.seed()
         log.info("empty vault: copied %d starter files into %s", len(copied), vault.root)
 
-    mcp = create_server(settings)
     if args.transport == "stdio":
+        # A local client spawned us; there is no network to authenticate.
+        mcp = create_server(dataclasses.replace(settings, auth_provider="none"))
         mcp.run(transport="stdio", show_banner=False)
     else:
+        if settings.auth_provider == "none":
+            log.warning("no authentication (AUTH_PROVIDER=none): only expose this server on localhost")
+        mcp = create_server(settings)
         mcp.run(
             transport="http",
             host=args.host or settings.host,

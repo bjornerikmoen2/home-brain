@@ -26,6 +26,7 @@ def index(vault: Vault, tmp_path: Path) -> Iterator[Index]:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    settings = Settings(vault_path=tmp_path / "vault", data_path=tmp_path / "data")
+    # git is off here to keep the server tests fast; test_gitsync covers versioning.
+    settings = Settings(vault_path=tmp_path / "vault", data_path=tmp_path / "data", vault_git=False)
     Vault(settings.vault_path).seed()
     return settings

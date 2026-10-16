@@ -7,6 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# git keeps the vault's history (one commit per change).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first (cached until pyproject.toml changes), then the code.
 COPY pyproject.toml README.md ./
 RUN mkdir -p src/home_brain && touch src/home_brain/__init__.py \
@@ -17,9 +22,11 @@ COPY src ./src
 RUN pip install --root-user-action=ignore --no-deps .
 
 # UID/GID 1000 by default; override with `user:` in compose to match the NAS share owner.
+# /data is sticky world-writable so an overridden UID can still use a fresh data volume.
 RUN useradd --uid 1000 --create-home brain \
     && mkdir -p /vault /data \
-    && chown brain:brain /vault /data
+    && chown brain:brain /vault /data \
+    && chmod 1777 /data
 USER brain
 
 ENV VAULT_PATH=/vault \
