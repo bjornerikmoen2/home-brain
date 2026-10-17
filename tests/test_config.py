@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,16 @@ GITHUB_ENV = {
     "GITHUB_CLIENT_SECRET": "s3cret",
     "ALLOWED_USERS": "SomeUser, @other ",
 }
+NTFY_ENV = {
+    "NTFY_URL": "http://ntfy",
+    "NTFY_TOPIC": "family",
+    "NTFY_TOKEN": "tk_secret",
+    "BRIEFING_TIME": "7:30",
+}
 
 
 def env(monkeypatch: pytest.MonkeyPatch, values: dict[str, str]) -> None:
-    for key in (*GITHUB_ENV, "VAULT_PATH", "DATA_PATH", "VAULT_GIT", "OAUTH_JWT_SIGNING_KEY"):
+    for key in (*GITHUB_ENV, *NTFY_ENV, "VAULT_PATH", "DATA_PATH", "VAULT_GIT", "OAUTH_JWT_SIGNING_KEY"):
         monkeypatch.delenv(key, raising=False)
     for key, value in values.items():
         monkeypatch.setenv(key, value)
@@ -28,6 +35,31 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.vault_path == Path("vault")
     assert settings.vault_git is True
     assert settings.auth_provider == "none"
+    assert settings.ntfy_url is None
+    assert settings.briefing_time == dt.time(19, 0)
+
+
+def test_ntfy_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    env(monkeypatch, NTFY_ENV)
+    settings = Settings.from_env()
+    assert (settings.ntfy_url, settings.ntfy_topic, settings.ntfy_token) == ("http://ntfy", "family", "tk_secret")
+    assert settings.briefing_time == dt.time(7, 30)
+    assert "tk_secret" not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"NTFY_URL": "ntfy"}, "NTFY_URL must be a full URL"),
+        ({"NTFY_TOPIC": "family news"}, "NTFY_TOPIC may only contain"),
+        ({"BRIEFING_TIME": "25:00"}, "BRIEFING_TIME must be a time"),
+        ({"BRIEFING_TIME": "evening"}, "BRIEFING_TIME must be a time"),
+    ],
+)
+def test_invalid_ntfy_settings(monkeypatch: pytest.MonkeyPatch, override: dict[str, str], message: str) -> None:
+    env(monkeypatch, {**NTFY_ENV, **override})
+    with pytest.raises(ConfigError, match=message):
+        Settings.from_env()
 
 
 def test_github_settings(monkeypatch: pytest.MonkeyPatch) -> None:

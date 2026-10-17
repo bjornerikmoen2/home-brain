@@ -18,6 +18,11 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       ALLOWED_USERS: ${ALLOWED_USERS}
+      # Push notifications; off while NTFY_URL is empty (docs/deploy.md, step 6).
+      NTFY_URL: ${NTFY_URL:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-home-brain}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      BRIEFING_TIME: ${BRIEFING_TIME:-19:00}
     volumes:
       # nocopy: otherwise Docker tries to chown the empty NFS share to the image's UID on first
       # use, which the NAS refuses (or which would leave the wrong owner).
@@ -35,6 +40,34 @@ services:
     networks:
       - proxy
 
+  ntfy:
+    # Push notification server for the phone app; reached through the tunnel as ntfy.<domain>.
+    image: binwiederhier/ntfy:latest
+    container_name: ntfy
+    command: serve
+    environment:
+      TZ: Europe/Oslo
+      NTFY_BASE_URL: ${NTFY_PUBLIC_URL:?set NTFY_PUBLIC_URL in .env, see .env.example}
+      # Instant delivery on iOS goes through ntfy.sh, which only sees a message ID, not the text.
+      NTFY_UPSTREAM_BASE_URL: https://ntfy.sh
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      # Nobody can read or publish without a login or token.
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_ENABLE_LOGIN: "true"
+    volumes:
+      - ntfy-data:/var/lib/ntfy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O - http://localhost:80/v1/health | grep -q '\"healthy\":true'"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - proxy
+
 volumes:
   vault:
     # Compose creates this once; after changing NAS_* run `docker volume rm home-brain-vault`.
@@ -46,8 +79,12 @@ volumes:
       o: "addr=${NAS_ADDRESS},rw,nfsvers=${NAS_NFS_VERSION:-3},hard,timeo=600"
       device: ":${NAS_VAULT_EXPORT}"
   home-brain-data:
-    # Search index and login state. Local disk only: SQLite must not live on NFS.
+    # Search index, login state and the record of sent notifications. Local disk only: SQLite
+    # must not live on NFS.
     name: home-brain-data
+  ntfy-data:
+    # ntfy's users, tokens and message cache.
+    name: ntfy-data
 
 networks:
   proxy:

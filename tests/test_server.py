@@ -4,10 +4,12 @@ import datetime as dt
 from collections.abc import AsyncIterator
 
 import pytest
+from conftest import FakeNotifier
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from home_brain.config import Settings
+from home_brain.notify import Message
 from home_brain.server import build_instructions, create_server
 from home_brain.vault import Vault
 
@@ -128,8 +130,17 @@ async def test_remind_tool(client: Client, settings: Settings, frozen_time: None
 
 
 @pytest.mark.parametrize(
+    ("at", "expected"),
+    [("+5m", "2026-10-19T12:05"), ("+ 90M", "2026-10-19T13:30"), ("+2h", "2026-10-19T14:00"), ("+3d", "2026-10-22T12:00")],
+)
+async def test_remind_from_now(client: Client, frozen_time: None, at: str, expected: str) -> None:
+    assert (await call(client, "remind", at=at, text="Check the oven"))["reminder"]["at"] == expected
+
+
+@pytest.mark.parametrize(
     ("at", "message"),
     [
+        ("+0m", "at must be"),
         ("2026-10-19T11:00", "in the past"),
         ("2026-10-18", "in the past"),
         ("next week", "at must be"),
@@ -139,6 +150,18 @@ async def test_remind_tool(client: Client, settings: Settings, frozen_time: None
 async def test_remind_rejects_bad_times(client: Client, frozen_time: None, at: str, message: str) -> None:
     with pytest.raises(ToolError, match=message):
         await client.call_tool("remind", {"at": at, "text": "x"})
+
+
+async def test_notify_tool(settings: Settings, notifier: FakeNotifier) -> None:
+    async with Client(create_server(settings, notifier=notifier)) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+        assert set(tools) == TOOLS | {"notify"}
+        assert tools["notify"].annotations.open_world_hint is True
+        assert await call(client, "notify", text=" Dinner is ready ", title="Home") == {"sent": True}
+        notifier.failures = 1
+        with pytest.raises(ToolError, match="could not be sent"):
+            await client.call_tool("notify", {"text": "Hello"})
+    assert notifier.sent == [Message("Dinner is ready", title="Home")]
 
 
 async def test_empty_search_gives_a_hint(client: Client) -> None:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -39,6 +41,14 @@ class Settings:
     jwt_signing_key: str | None = field(default=None, repr=False)
     """Optional key for the tokens home-brain issues to Claude; defaults to one derived from the client secret."""
 
+    ntfy_url: str | None = None
+    """ntfy server home-brain publishes to, e.g. http://ntfy; push notifications are off when unset."""
+    ntfy_topic: str = "home-brain"
+    ntfy_token: str | None = field(default=None, repr=False)
+    """Access token of the ntfy user home-brain publishes as."""
+    briefing_time: dt.time = dt.time(19, 0)
+    """When the evening briefing about tomorrow is pushed."""
+
     @classmethod
     def from_env(cls) -> Settings:
         env = os.environ
@@ -56,11 +66,21 @@ class Settings:
             github_client_secret=env.get("GITHUB_CLIENT_SECRET") or None,
             allowed_users=parse_users(env.get("ALLOWED_USERS", "")),
             jwt_signing_key=env.get("OAUTH_JWT_SIGNING_KEY") or None,
+            ntfy_url=env.get("NTFY_URL") or None,
+            ntfy_topic=env.get("NTFY_TOPIC") or "home-brain",
+            ntfy_token=env.get("NTFY_TOKEN") or None,
+            briefing_time=parse_time("BRIEFING_TIME", env.get("BRIEFING_TIME") or "19:00"),
         )
         settings.validate()
         return settings
 
     def validate(self) -> None:
+        if self.ntfy_url:
+            url = urlparse(self.ntfy_url)
+            if url.scheme not in ("https", "http") or not url.netloc:
+                raise ConfigError(f"NTFY_URL must be a full URL like http://ntfy, not {self.ntfy_url!r}")
+            if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", self.ntfy_topic):
+                raise ConfigError("NTFY_TOPIC may only contain letters, digits, '-' and '_' (at most 64)")
         if self.auth_provider not in ("none", "github"):
             raise ConfigError(f"AUTH_PROVIDER must be 'none' or 'github', not {self.auth_provider!r}")
         if self.auth_provider == "none":
@@ -87,3 +107,10 @@ class Settings:
 
 def parse_users(value: str) -> frozenset[str]:
     return frozenset(u.strip().lstrip("@").lower() for u in value.split(",") if u.strip())
+
+
+def parse_time(name: str, value: str) -> dt.time:
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip())
+    if not match or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+        raise ConfigError(f"{name} must be a time like 19:00, not {value!r}")
+    return dt.time(int(match.group(1)), int(match.group(2)))

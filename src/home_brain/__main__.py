@@ -59,7 +59,8 @@ def _serve(settings: Settings, args: argparse.Namespace) -> None:
     else:
         if settings.auth_provider == "none":
             log.warning("no authentication (AUTH_PROVIDER=none): only expose this server on localhost")
-        mcp = create_server(settings)
+        # Only the long-running HTTP server pushes reminders; a stdio copy would send them twice.
+        mcp = create_server(settings, run_scheduler=True)
         mcp.run(
             transport="http",
             host=args.host or settings.host,

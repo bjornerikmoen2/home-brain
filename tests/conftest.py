@@ -7,7 +7,27 @@ import pytest
 
 from home_brain.config import Settings
 from home_brain.index import Index
+from home_brain.notify import Message, NotifyError
 from home_brain.vault import Vault
+
+
+class FakeNotifier:
+    """Collects the messages instead of pushing them; fails the first `failures` sends."""
+
+    def __init__(self, failures: int = 0) -> None:
+        self.sent: list[Message] = []
+        self.failures = failures
+
+    def send(self, message: Message) -> None:
+        if self.failures:
+            self.failures -= 1
+            raise NotifyError("ntfy is unreachable")
+        self.sent.append(message)
+
+
+@pytest.fixture
+def notifier() -> FakeNotifier:
+    return FakeNotifier()
 
 
 @pytest.fixture

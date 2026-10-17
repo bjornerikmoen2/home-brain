@@ -88,7 +88,9 @@ Call `agenda` with `start: tomorrow`: it combines the routine, that week's event
 cancellations, and lists what each child needs to bring. Read its `sources` for homework details.
 
 **"Remind me ..."**
-Use the `remind` tool; the reminder is stored in `reminders.md` and shows up in `agenda`.
+Use the `remind` tool; the reminder is stored in `reminders.md`, shows up in `agenda`, and is
+pushed to the phone at its time (a date without a time at 08:00). For "in 20 minutes" pass
+`at: "+20m"`. To send something to the phone right now, use `notify`.
 
 **Tires and car service**
 Keep current tire facts in the vehicle's `tires` frontmatter (size, bought, tread depth and when it

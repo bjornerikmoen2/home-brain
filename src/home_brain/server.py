@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,6 +24,8 @@ from .auth import build_auth
 from .config import Settings
 from .gitsync import GitError, VaultGit
 from .index import Index
+from .notify import Message, Notifier, NotifyError, Ntfy, Priority
+from .scheduler import Scheduler
 from .vault import Vault, VaultError
 
 log = logging.getLogger(__name__)
@@ -39,6 +42,8 @@ The vault's filing conventions follow; read them again with read_note('_conventi
 """
 
 REMINDERS = "reminders.md"
+_FROM_NOW = re.compile(r"^\+\s*([1-9]\d*)\s*([mhd])$")
+_UNITS = {"m": "minutes", "h": "hours", "d": "days"}
 REMINDERS_BODY = "\n# Reminders\n\nOne-off reminders saved with the remind tool. Mark old ones `done: true` or delete them.\n"
 
 
@@ -66,6 +71,7 @@ def _parse_day(text: str) -> dt.date:
 READ_ONLY = {"readOnlyHint": True, "openWorldHint": False}
 EDIT = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}
 DELETE = {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False}
+SEND = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True}
 
 
 @contextmanager
@@ -109,11 +115,16 @@ def open_vault(settings: Settings) -> Vault:
     return Vault(settings.vault_path, on_change=commit)
 
 
-def create_server(settings: Settings) -> FastMCP:
+def create_server(settings: Settings, notifier: Notifier | None = None, run_scheduler: bool = False) -> FastMCP:
+    """The MCP server. With a notifier (from NTFY_URL unless given), it also has the `notify` tool,
+    and `run_scheduler` starts pushing reminders and briefings in the background."""
     vault = open_vault(settings)
     index = Index(vault, settings.data_path / "index.db")
     stats = index.refresh(force=True)
     log.info("vault %s: %d notes indexed (%s)", vault.root, index.count(), stats)
+    notifier = notifier or Ntfy.from_settings(settings)
+    if notifier is None:
+        log.info("push notifications are off (NTFY_URL is not set)")
 
     auth, middleware = build_auth(settings)
     mcp = FastMCP(
@@ -263,18 +274,24 @@ def create_server(settings: Settings) -> FastMCP:
 
     @mcp.tool(annotations=EDIT)
     def remind(
-        at: Annotated[str, Field(description='When: "YYYY-MM-DDTHH:MM" (local time) or just "YYYY-MM-DD".')],
+        at: Annotated[
+            str,
+            Field(description='When: "YYYY-MM-DDTHH:MM" (local time), just "YYYY-MM-DD", or from now: "+15m", "+2h", "+3d".'),
+        ],
         text: Annotated[str, Field(description="The reminder, written so it makes sense on its own.")],
         who: Annotated[str | None, Field(description="Person it concerns (note slug, e.g. 'ola').")] = None,
         note: Annotated[str, Field(description="Note to store it in; reminders.md unless it belongs with an event note.")] = REMINDERS,
     ) -> dict[str, Any]:
         """Save a one-off reminder ("remind me to buy a present on Thursday at 18:00"). It is stored
-        under `reminders` in the note and shows up in `agenda` on its day.
+        under `reminders` in the note and shows up in `agenda` on its day. When push notifications
+        are set up, it is also sent to the phone at that time (at 08:00 if it has no time).
         """
         with _tool_errors():
+            if match := _FROM_NOW.match(at.strip().lower()):
+                at = (now() + dt.timedelta(**{_UNITS[match.group(2)]: int(match.group(1))})).strftime("%Y-%m-%dT%H:%M")
             moment = as_moment(at)
             if moment is None or (len(at.strip()) > 10 and moment[1] is None):
-                raise VaultError('at must be "YYYY-MM-DDTHH:MM" or "YYYY-MM-DD"')
+                raise VaultError('at must be "YYYY-MM-DDTHH:MM", "YYYY-MM-DD" or like "+15m"')
             day, clock = moment
             if day < today() or (clock and dt.datetime.combine(day, dt.time.fromisoformat(clock)) < now()):
                 raise VaultError(f"{at} is in the past")
@@ -296,6 +313,32 @@ def create_server(settings: Settings) -> FastMCP:
                 vault.write(rel, frontmatter.render(meta, REMINDERS_BODY))
         index.refresh(force=True)
         return {"path": rel, "reminder": reminder}
+
+    if notifier is not None:
+
+        @mcp.tool(annotations=SEND)
+        def notify(
+            text: Annotated[str, Field(description="The message, written so it makes sense on its own.")],
+            title: Annotated[str | None, Field(description="Short title shown above the message.")] = None,
+            priority: Annotated[
+                Priority,
+                Field(description="'high' and 'urgent' pop up and vibrate longer; use them only when asked."),
+            ] = "default",
+        ) -> dict[str, Any]:
+            """Send a push notification to the user's phone right now, e.g. "send the shopping list to
+            my phone". For something at a later time, use `remind` instead.
+            """
+            if not text.strip():
+                raise ToolError("text is empty")
+            try:
+                notifier.send(Message(text.strip(), title=(title or "").strip() or None, priority=priority))
+            except NotifyError as exc:
+                log.warning("notify failed: %s", exc)
+                raise ToolError("the notification could not be sent; the ntfy server is not reachable or refused it") from exc
+            return {"sent": True}
+
+    if run_scheduler and notifier is not None:
+        Scheduler(vault, index, notifier, settings.data_path / "scheduler.db", settings.briefing_time).start()
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> PlainTextResponse:

@@ -2,15 +2,16 @@
 
 A self-hosted personal assistant backend: a markdown vault containing the information an AI needs
 to work as an efficient personal assistant, exposed to Claude as an MCP server. Claude searches the
-vault to answer questions and keeps it up to date as you share new information. Later phases add
-proactive reminders pushed to your phone via ntfy.
+vault to answer questions and keeps it up to date as you share new information. Reminders and
+daily briefings are pushed to your phone through a self-hosted [ntfy](https://ntfy.sh).
 
 Sibling project to [home-board](https://github.com/bjornerikmoen2/home-board).
 Architecture and roadmap: [docs/plan.md](docs/plan.md).
 
-**Status:** Phase 2. Running on a home server behind GitHub login and a Cloudflare Tunnel
+**Status:** Phase 3. Running on a home server behind GitHub login and a Cloudflare Tunnel
 ([docs/deploy.md](docs/deploy.md)), with the vault on a NAS and one git commit per change. The
-`agenda` and `remind` tools answer date questions; notifications (Phase 3) come next.
+`agenda` and `remind` tools answer date questions, and a scheduler pushes reminders and briefings
+to the phone.
 
 ## Quick start (local, Windows)
 
@@ -68,7 +69,8 @@ see [docs/deploy.md](docs/deploy.md).
 | `move_note` | Rename/refile a note, never overwrites |
 | `delete_note` | Soft delete into `.trash/` |
 | `agenda` | Everything dated for one or more days: events, weekly routines (RRULE), birthdays, deadlines and reminders, with a per-person packing list; plus upcoming deadlines within their warning window |
-| `remind` | Save a one-off reminder in `reminders.md` |
+| `remind` | Save a one-off reminder in `reminders.md` (at a date-time, or `+15m` / `+2h` / `+3d` from now); it is pushed to the phone when due |
+| `notify` | Push a message to the phone right now (only when ntfy is configured) |
 
 Dates in `events`, `recurring`, `due`, `reminders` and `birthday` are validated when a note is
 saved; see the vault's `_conventions.md` for the fields, including `cancels` (skip a routine item
@@ -76,6 +78,23 @@ on one day) and `break: true` (school holidays).
 
 The server's instructions to Claude are the contents of the vault's `_conventions.md`, so editing
 that file (and restarting) changes how Claude files things.
+
+## Push notifications
+
+With `NTFY_URL` set, the HTTP server checks every minute what is due and pushes it to one ntfy
+topic (the stdio server never does, so a local copy can't send duplicates):
+
+| What | When |
+|---|---|
+| Reminders (`reminders` in any note) | At their time; a date without a time at 08:00 |
+| Tomorrow: the agenda for tomorrow, with the packing list | Daily at `BRIEFING_TIME` (19:00) |
+| Week ahead: events, birthdays and deadlines, without the weekly routine | Sundays at 18:00 |
+| Monday check: deadlines within their warning time, birthdays in the next 14 days with gift ideas, tire tread, age and change season, broken dates | Mondays at 08:00, only if there is something to report |
+
+The texts are fixed templates built from `agenda`, so they match what Claude answers. What was
+sent is recorded in `DATA_PATH/scheduler.db`, not in the vault, so nothing is sent twice. After a
+restart or an ntfy outage, anything missed in the last 6 hours (the same day, for briefings) is
+sent late. Notes with `example: true` are ignored.
 
 ## Docker
 
@@ -95,7 +114,7 @@ For the real deployment (NAS vault over NFS, GitHub login, Cloudflare Tunnel) us
 | Variable | Default | Meaning |
 |---|---|---|
 | `VAULT_PATH` | `vault` | Vault root folder |
-| `DATA_PATH` | `data` | Search index and login state. Keep it on a local disk, not NFS |
+| `DATA_PATH` | `data` | Search index, login state and the record of sent notifications. Keep it on a local disk, not NFS |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | HTTP bind address |
 | `VAULT_GIT` | `true` | Keep the vault in git, one commit per change |
 | `VAULT_GIT_AUTHOR_NAME` / `_EMAIL` | `home-brain` / `home-brain@localhost` | Author of those commits |
@@ -104,6 +123,10 @@ For the real deployment (NAS vault over NFS, GitHub login, Cloudflare Tunnel) us
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | | GitHub OAuth App credentials |
 | `ALLOWED_USERS` | | Comma-separated GitHub logins allowed to use the server |
 | `OAUTH_JWT_SIGNING_KEY` | derived from the client secret | Key for the tokens home-brain issues to Claude |
+| `NTFY_URL` | | ntfy server to publish to, e.g. `http://ntfy`; push notifications are off when empty |
+| `NTFY_TOPIC` | `home-brain` | ntfy topic for all messages |
+| `NTFY_TOKEN` | | Access token of the ntfy user home-brain publishes as |
+| `BRIEFING_TIME` | `19:00` | When the evening briefing about tomorrow is sent |
 
 Commands: `home-brain serve [--transport http|stdio] [--host H] [--port P]`, `home-brain init`
 (copy missing starter files into the vault, never overwrites), `home-brain reindex`.
@@ -123,6 +146,9 @@ src/home_brain/
   gitsync.py       vault git history: one commit per change, outside edits included
   auth.py          GitHub OAuth (FastMCP OAuth proxy) and the ALLOWED_USERS check
   config.py        settings from environment variables, with validation
+  notify.py        ntfy client
+  briefing.py      texts of the pushed reminders, briefings and Monday check
+  scheduler.py     background loop: what is due, sending, record of what was sent
   server.py        FastMCP server and tools
   vault_template/  starter vault
 ```

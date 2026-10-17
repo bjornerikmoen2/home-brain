@@ -26,6 +26,8 @@ Inspiration: [basic-memory](https://github.com/basicmachines-co/basic-memory),
 | Exposure | Cloudflare Tunnel | Public HTTPS for claude.ai without port forwarding |
 | Chat UI | Claude app (web/desktop/mobile) via custom connector | Uses existing subscription; no API cost for interactive use |
 | Timezone | Europe/Oslo | Same as home-board |
+| Scheduler | A 1-minute loop in the server, with a record of what was sent in SQLite (not APScheduler) | After a restart, missed reminders and briefings are sent late instead of lost; no extra dependency |
+| Briefings | Fixed text templates, one ntfy topic, 19:00 | Deterministic and free; per-person topics can come with other household members (Phase 4) |
 
 ## Architecture
 
@@ -39,7 +41,7 @@ Inspiration: [basic-memory](https://github.com/basicmachines-co/basic-memory),
 │  home-brain (Python, FastMCP, streamable HTTP)        ▼    │  │
 │   ├─ MCP tools: search/read/write/patch/agenda/remind  ntfy ┘  │
 │   ├─ index: SQLite FTS5 + frontmatter (local volume)    ▲      │
-│   ├─ scheduler (APScheduler): reminders, briefings ─────┘      │
+│   ├─ scheduler (1-minute loop): reminders, briefings ───┘      │
 │   └─ gitsync: commit per write, debounced push                 │
 │        │ /vault (NFS)                  │ REST (service acct)   │
 └────────┼───────────────────────────────┼───────────────────────┘
@@ -132,16 +134,19 @@ Plus: server `instructions` = contents of `vault/_conventions.md`, and an MCP pr
 
 ## Scheduler & notifications
 
-APScheduler inside the home-brain container (single process, Europe/Oslo):
+A background thread in the home-brain HTTP server (single process, Europe/Oslo) checks every
+minute what is due:
 
 | Job | When | What |
 |---|---|---|
-| Due reminders | every minute | Send `reminders` whose `at` has passed and aren't sent; mark sent |
-| Tomorrow briefing | daily 19:00 | `agenda(tomorrow)` → "Tomorrow: gym for X (gym clothes, indoor shoes); forest trip for Y (packed lunch)". Optional LLM phrasing |
-| Week ahead | Sunday 18:00 | `agenda(next 7 days)` |
-| Maintenance check | Monday 08:00 | `due` items within `warn_days`; tread close to legal minimum (winter 3 mm / summer 1.6 mm); tires older than 6 years; tire-change season (Oct/Apr); birthdays within 14 days → include gift ideas from the person's note |
+| Due reminders | every minute | Send `reminders` whose `at` has passed (a date without a time at 08:00) |
+| Tomorrow briefing | daily 19:00 (`BRIEFING_TIME`) | `agenda(tomorrow)` → "Gym (Ola) … Bring: Ola: gym clothes, indoor shoes"; "Nothing on the agenda." on quiet days, so silence means something is wrong |
+| Week ahead | Sunday 18:00 | `agenda(next 7 days)` without the weekly routine |
+| Maintenance check | Monday 08:00 | `due` items within `warn_days`; tread close to legal minimum (winter 3 mm / summer 1.6 mm); tires older than 6 years; tire-change season (Oct/Apr); birthdays within 14 days → include gift ideas from the person's note; invalid dates. Not sent when there is nothing to report |
 
-State for "already sent" lives in SQLite (not in the vault) so the vault stays clean.
+State for "already sent" lives in SQLite (not in the vault) so the vault stays clean. Anything
+missed while the server or ntfy was down is sent up to 6 hours late (briefings only on the same
+day). Notes with `example: true` are skipped.
 
 ntfy: self-hosted, `auth-default-access: deny-all`, a publish token for home-brain, a user for the
 phone app. For instant iOS delivery set `upstream-base-url: https://ntfy.sh` (ntfy.sh only sees a
@@ -274,9 +279,11 @@ and shows up as a commit in GitHub.
 **Done when:** "what needs to be packed for school tomorrow?" is answered from one `agenda` call.
 
 ### Phase 3 — Proactive
-- [ ] ntfy container + auth; `notify` tool
-- [ ] APScheduler jobs: due reminders, 19:00 tomorrow briefing, Sunday week-ahead, Monday maintenance
-- [ ] Optional: Claude API phrasing for briefings
+- [x] ntfy container + auth; `notify` tool
+- [x] Scheduler: due reminders, 19:00 tomorrow briefing, Sunday week-ahead, Monday maintenance
+- [x] `remind` accepts times relative to now (`+15m`), since Claude doesn't always know the time
+- [ ] Deploy: `ntfy.<domain>` tunnel hostname, ntfy users and token, phone app
+- [ ] Later, if wanted: Claude API phrasing for briefings (fixed templates for now)
 
 **Done when:** a reminder added from the Claude app arrives as a push at the right time, and the
 evening briefing arrives daily.
@@ -294,5 +301,3 @@ evening briefing arrives daily.
 - NAS: IP, pool/dataset path, NFS export permissions (container UID).
 - OAuth provider: GitHub (simplest) or Google?
 - Which people to model, and how school information arrives (PDF, apps like Vigilo/Visma, e-mail?).
-- Briefing time (19:00?) and who receives which notifications (one topic or per person?).
-- Use the Claude API for briefing phrasing (needs an API key), or keep it fully deterministic?
