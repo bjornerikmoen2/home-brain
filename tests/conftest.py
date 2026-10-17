@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from home_brain.calendars import Calendars
 from home_brain.config import Settings
-from home_brain.homeboard import Chore, HomeBoardError
+from home_brain.homeboard import Chore, HomeBoardError, HomeBoardRefused
 from home_brain.index import Index
 from home_brain.notify import Message, NotifyError
 from home_brain.vault import Vault
@@ -23,23 +23,27 @@ CHORES = [
     Chore(MON, "Feed the cat", "todo", "daily", 10, due="09:00", assigned_to="Nora"),
     Chore(MON, "Vacuum room", "todo", "during_week", 20, assigned_to="Ola"),
     Chore(MON, "Empty dishwasher", "done", "daily", 10, group="kids", completed_by="Nora",
-          completed_at=dt.datetime(2026, 10, 19, 11, 5)),
+          completed_at=dt.datetime(2026, 10, 19, 11, 5), completion_id="0b5e3f7a-2c41-4d8e-9a6b-1f2e3d4c5b6a"),
     Chore(TUE, "Make bed", "todo", "daily", 5, due="08:00", assigned_to="Ola"),
     Chore(TUE, "Vacuum room", "todo", "during_week", 20, assigned_to="Ola"),
     Chore(TUE, "Empty dishwasher", "todo", "daily", 10, group="kids"),
 ]
 """Chores as home-board would report them for Monday 19 and Tuesday 20 October 2026."""
 
+NORA_ID = "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f"
+OLA_ID = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+FEED_CAT_ID = "9c8b7a6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d"
+
 POINTS = {
     "timezone": "Europe/Oslo",
     "today": "2026-10-19",
     "pointToMoneyRate": 0.5,
     "users": [
-        {"name": "Nora", "scoreboardPoints": 10, "pointsSinceLastPayout": 10, "moneyToPay": 5.0, "lastPayoutAt": None,
-         "earnedThisWeek": 15, "earnedThisMonth": 15,
-         "waitingForApproval": [{"date": "2026-10-19", "title": "Feed the cat", "points": 10,
+        {"userId": NORA_ID, "name": "Nora", "scoreboardPoints": 10, "pointsSinceLastPayout": 10, "moneyToPay": 5.0,
+         "lastPayoutAt": None, "earnedThisWeek": 15, "earnedThisMonth": 15,
+         "waitingForApproval": [{"completionId": FEED_CAT_ID, "date": "2026-10-19", "title": "Feed the cat", "points": 10,
                                  "completedAt": "2026-10-19T06:00:00Z"}]},
-        {"name": "Ola", "scoreboardPoints": 30, "pointsSinceLastPayout": 30, "moneyToPay": 15.0,
+        {"userId": OLA_ID, "name": "Ola", "scoreboardPoints": 30, "pointsSinceLastPayout": 30, "moneyToPay": 15.0,
          "lastPayoutAt": "2026-10-01T18:00:00Z", "earnedThisWeek": 20, "earnedThisMonth": 30, "waitingForApproval": []},
     ],
 }
@@ -47,10 +51,39 @@ POINTS = {
 
 
 class FakeHomeBoard:
-    def __init__(self, chores: list[Chore] = CHORES, error: str | None = None) -> None:
+    """home-board's integration API; with `write`, it also takes approvals and bonus points."""
+
+    def __init__(self, chores: list[Chore] = CHORES, error: str | None = None, write: bool = False) -> None:
         self._chores = chores
         self.error = error
+        self.can_write = write
         self.calls: list[tuple[dt.date, dt.date]] = []
+        self.changes: list[tuple] = []
+
+    def approve(self, completion_id: str, points: int | None = None) -> dict:
+        self._check(completion_id)
+        self.changes.append(("approve", completion_id, points))
+        return {"message": "Chore approved", "title": "Feed the cat", "completedBy": "Nora", "pointsAwarded": points or 10}
+
+    def reject(self, completion_id: str, reason: str | None = None) -> dict:
+        self._check(completion_id)
+        self.changes.append(("reject", completion_id, reason))
+        return {"message": "Chore rejected", "title": "Feed the cat", "completedBy": "Nora", "pointsAwarded": 0}
+
+    def award(self, user_id: str, points: int, description: str) -> dict:
+        if self.error:
+            raise HomeBoardError(self.error)
+        self.changes.append(("award", user_id, points, description))
+        name = next(u["name"] for u in POINTS["users"] if u["userId"] == user_id)
+        return {"message": "Bonus points awarded", "name": name, "pointsAwarded": points}
+
+    def _check(self, completion_id: str) -> None:
+        if self.error:
+            raise HomeBoardError(self.error)
+        if completion_id != FEED_CAT_ID:
+            raise HomeBoardRefused("No done chore with this completion id")
+        if any(c[1] == completion_id for c in self.changes):
+            raise HomeBoardRefused("'Feed the cat' by Nora was already approved or rejected")
 
     def chores(self, start: dt.date, end: dt.date) -> list[Chore]:
         self.calls.append((start, end))

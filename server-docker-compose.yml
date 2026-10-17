@@ -26,6 +26,7 @@ services:
       # Chores from Home-Board; off while HOMEBOARD_URL is empty (docs/deploy.md, step 7).
       HOMEBOARD_URL: ${HOMEBOARD_URL:-}
       HOMEBOARD_API_KEY: ${HOMEBOARD_API_KEY:-}
+      HOMEBOARD_WRITE_KEY: ${HOMEBOARD_WRITE_KEY:-}
       # Calendar events (e.g. Google Calendar); off while empty (docs/deploy.md, step 8).
       CALENDAR_URLS: ${CALENDAR_URLS:-}
     volumes:

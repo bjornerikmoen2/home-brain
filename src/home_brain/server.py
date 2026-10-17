@@ -24,7 +24,15 @@ from .auth import build_auth
 from .calendars import Calendars
 from .config import Settings
 from .gitsync import GitError, VaultGit
-from .homeboard import HomeBoard, HomeBoardError, agenda_items, chore_report, points_report
+from .homeboard import (
+    HomeBoard,
+    HomeBoardError,
+    HomeBoardRefused,
+    agenda_items,
+    chore_report,
+    find_child,
+    points_report,
+)
 from .index import Index
 from .notify import Message, Notifier, NotifyError, Ntfy, Priority
 from .scheduler import Scheduler
@@ -422,7 +430,8 @@ def create_server(
             month, the next payout (`money_to_pay`, in the family's currency at `point_to_money_rate`)
             and done chores still waiting for a parent's approval (their points count once approved).
             Use it for "how many points does Ola have?", "how much allowance do I owe the kids?" or
-            "which chores do I need to approve?". Approving and paying out happen in Home-Board itself.
+            "which chores do I need to approve?". Each waiting chore has the `id` that
+            `approve_chores` takes, when that tool is available. Payouts happen in Home-Board itself.
             """
             try:
                 raw = homeboard.points()
@@ -430,6 +439,77 @@ def create_server(
                 log.warning("scoreboard failed: %s", exc)
                 raise ToolError("Home-Board could not be reached, so the points are unknown right now") from exc
             return points_report(raw, who)
+
+    if homeboard is not None and homeboard.can_write:
+
+        @mcp.tool(annotations=EDIT)
+        def approve_chores(
+            ids: Annotated[
+                list[str],
+                Field(min_length=1, max_length=50, description="The `id` of each done chore, from `scoreboard` (waiting_for_approval) or `chores`."),
+            ],
+            points: Annotated[
+                int | None,
+                Field(ge=0, le=1000, description="Points to give instead of the chore's own; only when approving a single chore."),
+            ] = None,
+        ) -> dict[str, Any]:
+            """Approve done chores in Home-Board, as a parent would in the app: the child who did
+            each one gets its points. Use it when the user asks, e.g. "approve Ola's chores" or
+            "approve everything that's waiting". Call `scoreboard` first for the ids, approve only
+            the chores the user meant, and tell them what was approved and the points given.
+            """
+            if points is not None and len(ids) != 1:
+                raise ToolError("points can only be given when approving a single chore")
+            approved, failed = [], []
+            for chore_id in ids:
+                try:
+                    done = homeboard.approve(chore_id, points)
+                except HomeBoardError as exc:
+                    log.warning("approving %s failed: %s", chore_id, exc)
+                    failed.append({"id": chore_id, "error": str(exc) if isinstance(exc, HomeBoardRefused) else "Home-Board could not be reached"})
+                else:
+                    approved.append({"title": done.get("title"), "who": done.get("completedBy"), "points": done.get("pointsAwarded", 0)})
+            result: dict[str, Any] = {"approved": approved}
+            if failed:
+                result["failed"] = failed
+            return result
+
+        @mcp.tool(annotations=DELETE)
+        def reject_chore(
+            id: Annotated[str, Field(description="The `id` of the done chore, from `scoreboard` or `chores`.")],
+            reason: Annotated[str | None, Field(description="Why, shown to the child, e.g. 'The bed isn't made'.")] = None,
+        ) -> dict[str, Any]:
+            """Reject a chore a child marked as done that wasn't really done: no points, and it
+            can't be approved afterwards. Only when the user clearly asks for it.
+            """
+            try:
+                done = homeboard.reject(id, (reason or "").strip() or None)
+            except HomeBoardRefused as exc:
+                raise ToolError(str(exc)) from exc
+            except HomeBoardError as exc:
+                log.warning("rejecting %s failed: %s", id, exc)
+                raise ToolError("Home-Board could not be reached, so nothing was rejected") from exc
+            return {"rejected": {"title": done.get("title"), "who": done.get("completedBy")}}
+
+        @mcp.tool(annotations=EDIT)
+        def award_points(
+            who: Annotated[str, Field(description="The child: name or note slug, e.g. 'ola'.")],
+            points: Annotated[int, Field(ge=1, le=1000, description="Bonus points to add.")],
+            reason: Annotated[str, Field(min_length=1, max_length=200, description="What for, shown in the child's points history, e.g. 'Carried the shopping'.")],
+        ) -> dict[str, Any]:
+            """Give a child bonus points in Home-Board, e.g. "give Ola 20 points for helping with
+            dinner". They count towards the scoreboard and the next payout like chore points. Only
+            when the user asks for it; for done chores use `approve_chores` instead.
+            """
+            try:
+                child = find_child(homeboard.points(), who)
+                done = homeboard.award(str(child.get("userId")), points, reason.strip())
+            except HomeBoardRefused as exc:
+                raise ToolError(str(exc)) from exc
+            except HomeBoardError as exc:
+                log.warning("award_points failed: %s", exc)
+                raise ToolError("Home-Board could not be reached, so no points were given") from exc
+            return {"awarded": {"name": done.get("name"), "points": done.get("pointsAwarded"), "reason": reason.strip()}}
 
     if run_scheduler and notifier is not None:
         Scheduler(

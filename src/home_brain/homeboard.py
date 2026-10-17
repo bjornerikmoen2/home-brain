@@ -1,7 +1,8 @@
-"""Chores from home-board, the family's chore and points app.
+"""Chores and points from home-board, the family's chore and points app.
 
-home-board answers GET /api/integrations/chores with an API key (its Integrations:ApiKey setting)
-instead of a user login, so home-brain can only read chores, not change them.
+home-board's integration endpoints take an API key instead of a user login. The read key
+(Integrations:ApiKey) only reads chores and points. The optional write key
+(Integrations:WriteApiKey) also approves or rejects done chores and gives bonus points.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +31,10 @@ _FRACTION = re.compile(r"(\.\d{6})\d+")
 
 class HomeBoardError(RuntimeError):
     """home-board could not be reached or refused the request."""
+
+
+class HomeBoardRefused(HomeBoardError):
+    """home-board said why it refused a change (unknown chore, already approved, ...)."""
 
 
 @dataclass(frozen=True)
@@ -49,6 +55,8 @@ class Chore:
     completed_by: str | None = None
     completed_at: dt.datetime | None = None
     """Local time."""
+    completion_id: str | None = None
+    """What approving or rejecting the chore takes, once it is done."""
 
     @property
     def done(self) -> bool:
@@ -68,6 +76,8 @@ class Chore:
             out["completed_by"] = self.completed_by
         if self.completed_at:
             out["completed_at"] = f"{self.completed_at:%H:%M}"
+        if self.status == "done" and self.completion_id:
+            out["id"] = self.completion_id
         if now and not self.done and self.status != "rejected":
             if self.date < now.date() or (self.date == now.date() and self.due and self.due < f"{now:%H:%M}"):
                 out["late"] = True
@@ -83,16 +93,21 @@ def slug(name: str) -> str:
 
 
 class HomeBoard:
-    def __init__(self, url: str, api_key: str, timeout: float = 10.0) -> None:
+    def __init__(self, url: str, api_key: str, write_key: str | None = None, timeout: float = 10.0) -> None:
         self.url = url.rstrip("/")
         self._api_key = api_key
+        self._write_key = write_key
         self._timeout = timeout
 
     @classmethod
     def from_settings(cls, settings: Settings) -> HomeBoard | None:
         if not settings.homeboard_url or not settings.homeboard_api_key:
             return None
-        return cls(settings.homeboard_url, settings.homeboard_api_key)
+        return cls(settings.homeboard_url, settings.homeboard_api_key, settings.homeboard_write_key)
+
+    @property
+    def can_write(self) -> bool:
+        return bool(self._write_key)
 
     def chores(self, start: dt.date, end: dt.date) -> list[Chore]:
         found: list[Chore] = []
@@ -107,6 +122,40 @@ class HomeBoard:
     def points(self) -> dict[str, Any]:
         """Each child's points and the done chores waiting for approval, as home-board reports them."""
         return self._get("points")
+
+    def approve(self, completion_id: str, points: int | None = None) -> dict[str, Any]:
+        """Approves a done chore: its points (or `points`) go to the child. Returns the chore's
+        `title`, `completedBy` and `pointsAwarded`."""
+        body = {"pointsAwarded": points} if points is not None else {}
+        return self._post(f"completions/{_completion(completion_id)}/approve", body)
+
+    def reject(self, completion_id: str, reason: str | None = None) -> dict[str, Any]:
+        """Rejects a done chore that wasn't really done: no points."""
+        return self._post(f"completions/{_completion(completion_id)}/reject", {"reason": reason} if reason else {})
+
+    def award(self, user_id: str, points: int, description: str) -> dict[str, Any]:
+        """Gives a child bonus points; `user_id` is the child's `userId` from points()."""
+        return self._post(f"users/{user_id}/bonus-points", {"points": points, "description": description})
+
+    def _post(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not self._write_key:
+            raise HomeBoardError("HOMEBOARD_WRITE_KEY is not set, so home-brain can't change anything in home-board")
+        request = urllib.request.Request(
+            f"{self.url}/api/integrations/{endpoint}",
+            data=json.dumps(body).encode(),
+            headers={"X-Api-Key": self._write_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if reason := _reason(exc):
+                raise HomeBoardRefused(reason) from exc
+            hint = {401: ": wrong HOMEBOARD_WRITE_KEY", 404: ": home-board has no Integrations__WriteApiKey set, or is too old"}
+            raise HomeBoardError(f"home-board refused the change (HTTP {exc.code}{hint.get(exc.code, '')})") from exc
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise HomeBoardError(f"home-board is unreachable at {self.url}: {exc}") from exc
 
     def _get(self, endpoint: str, query: dict[str, str] | None = None) -> dict[str, Any]:
         url = f"{self.url}/api/integrations/{endpoint}" + (f"?{urllib.parse.urlencode(query)}" if query else "")
@@ -162,6 +211,7 @@ def points_report(raw: dict[str, Any], who: str | None = None) -> dict[str, Any]
         children.append({
             "name": name,
             "who": slug(name),
+            "user_id": user.get("userId"),
             "scoreboard_points": user.get("scoreboardPoints", 0),
             "earned_this_week": user.get("earnedThisWeek", 0),
             "earned_this_month": user.get("earnedThisMonth", 0),
@@ -169,7 +219,7 @@ def points_report(raw: dict[str, Any], who: str | None = None) -> dict[str, Any]
             "money_to_pay": round(float(user.get("moneyToPay") or 0), 2),
             "last_payout": f"{last_payout:%Y-%m-%d}" if last_payout else None,
             "waiting_for_approval": [
-                {"title": w.get("title"), "points": w.get("points", 0), "date": w.get("date"),
+                {"id": w.get("completionId"), "title": w.get("title"), "points": w.get("points", 0), "date": w.get("date"),
                  "completed_at": f"{c:%H:%M}" if (c := _local(w.get("completedAt"))) else None}
                 for w in user.get("waitingForApproval", [])
             ],
@@ -214,6 +264,36 @@ def agenda_items(chores: list[Chore], today: dt.date) -> list[Item]:
     return items
 
 
+def find_child(raw: dict[str, Any], who: str) -> dict[str, Any]:
+    """The child in points() called `who` ("ola", "Ola" or "Ola Nordmann"); an exact match wins."""
+    wanted = slug(who.lstrip("@"))
+    users = raw.get("users", [])
+    found = [u for u in users if slug(str(u.get("name") or "")) == wanted] or [
+        u for u in users if _matches(str(u.get("name") or ""), wanted)]
+    if len(found) != 1:
+        known = ", ".join(str(u.get("name")) for u in users) or "none"
+        problem = "Several children match" if found else "No child matches"
+        raise HomeBoardRefused(f"{problem} {who!r} in Home-Board. Children: {known}.")
+    return found[0]
+
+
+def _completion(value: str) -> str:
+    """A chore's `id` as home-board expects it; anything else is refused before asking."""
+    try:
+        return str(uuid.UUID(value.strip()))
+    except ValueError:
+        raise HomeBoardRefused(f"{value!r} is not a chore id; take the `id` from scoreboard or chores") from None
+
+
+def _reason(error: urllib.error.HTTPError) -> str | None:
+    """home-board's own explanation of a refused request, if it gave one."""
+    try:
+        message = json.loads(error.read() or b"{}").get("message")
+    except (ValueError, AttributeError, OSError):
+        return None
+    return str(message) if message else None
+
+
 def _matches(name: str, wanted: str) -> bool:
     """`ola` matches "Ola" and "Ola Nordmann"."""
     return slug(name) == wanted or slug(name).split("-")[0] == wanted
@@ -232,6 +312,7 @@ def _chore(raw: dict[str, Any]) -> Chore:
         group=raw.get("assignedToGroup") or None,
         completed_by=raw.get("completedBy") or None,
         completed_at=_local(raw.get("completedAt")),
+        completion_id=raw.get("completionId") or None,
     )
 
 

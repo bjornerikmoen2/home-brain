@@ -186,7 +186,8 @@ topic, user and token.
 With [Home-Board](https://github.com/bjornerikmoen2/home-board) on the same Docker host, home-brain
 answers "has Ola done her chores today?" (the `chores` tool) and lists chores in `agenda` and the
 evening briefing. It reads them from Home-Board's read-only `/api/integrations/chores` endpoint,
-which takes a shared key instead of a user login, so home-brain can't change anything there.
+which takes a shared key instead of a user login; with only this key, home-brain can't change
+anything there.
 
 1. Create the key on the server and add it to both `.env` files:
 
@@ -205,6 +206,22 @@ which takes a shared key instead of a user login, so home-brain can't change any
 
 The containers talk over the `proxy` network, so the key never leaves the server. People are
 matched by name: Home-Board's display name "Ola" is the vault's `ola`.
+
+**Approving chores and giving points from Claude (optional).** With a second key, home-brain
+also has the tools `approve_chores`, `reject_chore` and `award_points`. They are recorded in
+Home-Board under the admin named by `INTEGRATIONS_ACT_AS_USER` (a username), or else the first
+admin. Anyone who can use home-brain can then approve chores, so only add it if that's only the
+parents.
+
+```bash
+KEY=$(openssl rand -hex 32)
+echo "INTEGRATIONS_WRITE_API_KEY=$KEY" >> /opt/docker/home-board/.env
+echo "HOMEBOARD_WRITE_KEY=$KEY" >> /opt/docker/home-brain/.env
+```
+
+Home-Board's compose file needs `Integrations__WriteApiKey: "${INTEGRATIONS_WRITE_API_KEY:-}"`
+(and optionally `Integrations__ActAsUser: "${INTEGRATIONS_ACT_AS_USER:-}"`) next to the read key.
+Restart both as above; Claude then lists the three tools.
 
 ## 8. Calendar events (optional)
 

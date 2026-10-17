@@ -100,7 +100,9 @@ bring, who goes), with the same title so `agenda` shows them as one item.
 **Chores**
 The kids' chores and points live in Home-Board, not in the vault: don't make notes for them. Use
 the `chores` tool for "has Ola done her chores?" (`agenda` lists them too) and `scoreboard` for
-points, allowance and chores waiting for approval.
+points, allowance and chores waiting for approval. When the user asks, approve done chores with
+`approve_chores` (the `id`s from `scoreboard`), reject one that wasn't done with `reject_chore`,
+and give bonus points with `award_points`; say what was approved and how many points were given.
 
 **Tires and car service**
 Keep current tire facts in the vehicle's `tires` frontmatter (size, bought, tread depth and when it

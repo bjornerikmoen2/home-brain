@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import AsyncIterator
 
 import pytest
-from conftest import FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
+from conftest import FEED_CAT_ID, OLA_ID, FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
@@ -191,6 +191,39 @@ async def test_scoreboard_tool(settings: Settings) -> None:
     async with Client(create_server(settings, homeboard=FakeHomeBoard(error="down"))) as client:
         with pytest.raises(ToolError, match="Home-Board could not be reached"):
             await client.call_tool("scoreboard", {})
+
+
+async def test_approving_chores_and_giving_points(settings: Settings) -> None:
+    async with Client(create_server(settings, homeboard=FakeHomeBoard())) as client:
+        assert not {"approve_chores", "reject_chore", "award_points"} & {t.name for t in await client.list_tools()}
+    homeboard = FakeHomeBoard(write=True)
+    async with Client(create_server(settings, homeboard=homeboard)) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+        assert tools["reject_chore"].annotations.destructive_hint is True
+        assert tools["approve_chores"].annotations.destructive_hint is False
+
+        [waiting] = (await call(client, "scoreboard", who="nora"))["children"][0]["waiting_for_approval"]
+        result = await call(client, "approve_chores", ids=[waiting["id"], "not-waiting"])
+        assert result == {
+            "approved": [{"title": "Feed the cat", "who": "Nora", "points": 10}],
+            "failed": [{"id": "not-waiting", "error": "No done chore with this completion id"}],
+        }
+        with pytest.raises(ToolError, match="already approved or rejected"):
+            await client.call_tool("reject_chore", {"id": waiting["id"], "reason": "Not done"})
+        with pytest.raises(ToolError, match="points can only be given when approving a single chore"):
+            await client.call_tool("approve_chores", {"ids": [waiting["id"], waiting["id"]], "points": 5})
+
+        result = await call(client, "award_points", who="ola", points=20, reason=" Helped with dinner ")
+        assert result == {"awarded": {"name": "Ola", "points": 20, "reason": "Helped with dinner"}}
+        with pytest.raises(ToolError, match="No child matches 'kari'"):
+            await client.call_tool("award_points", {"who": "kari", "points": 5, "reason": "x"})
+    assert homeboard.changes == [("approve", FEED_CAT_ID, None), ("award", OLA_ID, 20, "Helped with dinner")]
+
+    async with Client(create_server(settings, homeboard=FakeHomeBoard(error="down", write=True))) as client:
+        assert (await call(client, "approve_chores", ids=[FEED_CAT_ID]))["failed"] == [
+            {"id": FEED_CAT_ID, "error": "Home-Board could not be reached"}]
+        with pytest.raises(ToolError, match="Home-Board could not be reached, so no points were given"):
+            await client.call_tool("award_points", {"who": "ola", "points": 5, "reason": "x"})
 
 
 async def test_agenda_with_calendar_events(settings: Settings, frozen_time: None) -> None:

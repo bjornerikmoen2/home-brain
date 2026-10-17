@@ -238,7 +238,9 @@ Notes:
 - Done: `chores(day?, who?, days?)`; `agenda` (up to 7 days) and the evening briefing list chores.
 - Done: `scoreboard(who?)` from `GET /api/integrations/points`: points, next payout, chores waiting
   for approval (also in the evening briefing).
-- Maybe later: `award_points(who, points, reason)` and approving chores (needs a separate write key).
+- Done: `approve_chores(ids, points?)`, `reject_chore(id, reason?)` and
+  `award_points(who, points, reason)`, through home-board's write endpoints. They take a separate
+  key (`Integrations__WriteApiKey` / `HOMEBOARD_WRITE_KEY`), so read-only stays the default.
 - Optional: home-board scoreboard tablet shows a "Tomorrow" panel from a read-only home-brain
   endpoint (Flutter change in home-board).
 
@@ -299,7 +301,8 @@ evening briefing arrives daily.
 - [x] home-board points: `scoreboard` (read-only, same key); approvals waiting in the evening briefing
 - [x] Calendar events (Google Calendar's secret iCal address) in `agenda`, the evening briefing and
       the week ahead; a feed that can't be read is mentioned instead of silently missing
-- [ ] Maybe: `award_points` / approving chores from Claude (needs a separate write key)
+- [x] Approving chores from Claude: `approve_chores`, `reject_chore` and `award_points`, through
+      home-board's write endpoints and a separate write key (`HOMEBOARD_WRITE_KEY`)
 - [ ] Two-way chat channel (Slack/Telegram/WhatsApp) using Claude API + the same tools
 - [ ] Access for other household members, with private folders
 - [ ] Semantic search (sqlite-vec) — only if keyword search proves insufficient

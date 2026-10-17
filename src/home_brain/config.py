@@ -53,6 +53,8 @@ class Settings:
     """home-board's API, e.g. http://home-board-api:8080; chores are off when unset."""
     homeboard_api_key: str | None = field(default=None, repr=False)
     """home-board's Integrations:ApiKey."""
+    homeboard_write_key: str | None = field(default=None, repr=False)
+    """home-board's Integrations:WriteApiKey: lets Claude approve chores and give bonus points."""
 
     calendar_urls: tuple[str, ...] = field(default=(), repr=False)
     """Secret iCal addresses of calendars (e.g. Google Calendar) whose events join the agenda."""
@@ -80,6 +82,7 @@ class Settings:
             briefing_time=parse_time("BRIEFING_TIME", env.get("BRIEFING_TIME") or "19:00"),
             homeboard_url=env.get("HOMEBOARD_URL") or None,
             homeboard_api_key=env.get("HOMEBOARD_API_KEY") or None,
+            homeboard_write_key=env.get("HOMEBOARD_WRITE_KEY") or None,
             calendar_urls=parse_urls(env.get("CALENDAR_URLS", "")),
         )
         settings.validate()
@@ -98,6 +101,8 @@ class Settings:
                 raise ConfigError(f"HOMEBOARD_URL must be a full URL like http://home-board-api:8080, not {self.homeboard_url!r}")
             if not self.homeboard_api_key:
                 raise ConfigError("HOMEBOARD_URL needs HOMEBOARD_API_KEY (home-board's Integrations__ApiKey)")
+        elif self.homeboard_write_key:
+            raise ConfigError("HOMEBOARD_WRITE_KEY needs HOMEBOARD_URL and HOMEBOARD_API_KEY")
         for number, address in enumerate(self.calendar_urls, 1):
             url = urlparse(address)
             if url.scheme not in ("https", "http") or not url.netloc:
