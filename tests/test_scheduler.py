@@ -101,7 +101,10 @@ def test_evening_briefing(scheduler_for: Callable[..., Scheduler], notifier: Fak
 def test_evening_briefing_with_chores(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
     scheduler = scheduler_for(notifier, homeboard=FakeHomeBoard())
     assert scheduler.tick(at(19, 19, 0)) == ["tomorrow:2026-10-19"]
-    assert notifier.sent[0].text.endswith("Chores:\nOla: Make bed (by 08:00)\nKids (shared): Empty dishwasher")
+    assert notifier.sent[0].text.endswith(
+        "Chores:\nOla: Make bed (by 08:00)\nKids (shared): Empty dishwasher\n\n"
+        "Waiting for your approval:\nNora: 1 chore (10 points)"
+    )
 
 
 def test_evening_briefing_when_home_board_is_down(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:

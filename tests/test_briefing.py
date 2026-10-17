@@ -41,6 +41,14 @@ def test_tomorrow_with_chores(notes: list[Note]) -> None:
     )
 
 
+def test_tomorrow_with_chores_waiting_for_approval(notes: list[Note]) -> None:
+    day = dt.date(2026, 10, 20)
+    message = briefing.tomorrow(build(notes, day, day, MON), day, waiting=["Nora: 1 chore (10 points)"])
+    assert message.text.endswith("\n\nWaiting for your approval:\nNora: 1 chore (10 points)")
+    quiet = briefing.tomorrow(build([], day, day, MON), day, waiting=["Nora: 1 chore (10 points)"])
+    assert (quiet.text, quiet.priority) == ("Nothing on the agenda.\n\nWaiting for your approval:\nNora: 1 chore (10 points)", "default")
+
+
 def test_chores_alone_and_not_in_the_week_ahead() -> None:
     day = dt.date(2026, 10, 20)
     chores = agenda_items(CHORES, MON)

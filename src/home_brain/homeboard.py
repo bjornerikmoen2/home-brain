@@ -99,13 +99,18 @@ class HomeBoard:
         first = start
         while first <= end:
             last = min(end, first + dt.timedelta(days=MAX_DAYS - 1))
-            found += [_chore(raw) for raw in self._get(first, last)["chores"]]
+            query = {"startDate": first.isoformat(), "endDate": last.isoformat()}
+            found += [_chore(raw) for raw in self._get("chores", query)["chores"]]
             first = last + dt.timedelta(days=1)
         return found
 
-    def _get(self, start: dt.date, end: dt.date) -> dict[str, Any]:
-        query = urllib.parse.urlencode({"startDate": start.isoformat(), "endDate": end.isoformat()})
-        request = urllib.request.Request(f"{self.url}/api/integrations/chores?{query}", headers={"X-Api-Key": self._api_key})
+    def points(self) -> dict[str, Any]:
+        """Each child's points and the done chores waiting for approval, as home-board reports them."""
+        return self._get("points")
+
+    def _get(self, endpoint: str, query: dict[str, str] | None = None) -> dict[str, Any]:
+        url = f"{self.url}/api/integrations/{endpoint}" + (f"?{urllib.parse.urlencode(query)}" if query else "")
+        request = urllib.request.Request(url, headers={"X-Api-Key": self._api_key})
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 return json.load(response)
@@ -142,6 +147,54 @@ def chore_report(chores: list[Chore], now: dt.datetime, who: str | None = None) 
         shared = [c.to_dict(now) for c in on_day if c.group and (c.group == "kids" or not wanted)]
         days.append({"date": day.isoformat(), "weekday": f"{day:%A}", "people": people, "shared": shared})
     return {"now": f"{now:%Y-%m-%dT%H:%M}", "days": days}
+
+
+def points_report(raw: dict[str, Any], who: str | None = None) -> dict[str, Any]:
+    """Per child: scoreboard points, points earned this week and month, the next payout and the
+    done chores waiting for a parent's approval."""
+    wanted = slug(who.lstrip("@")) if who else None
+    children = []
+    for user in raw.get("users", []):
+        name = str(user.get("name") or "")
+        if wanted and not _matches(name, wanted):
+            continue
+        last_payout = _local(user.get("lastPayoutAt"))
+        children.append({
+            "name": name,
+            "who": slug(name),
+            "scoreboard_points": user.get("scoreboardPoints", 0),
+            "earned_this_week": user.get("earnedThisWeek", 0),
+            "earned_this_month": user.get("earnedThisMonth", 0),
+            "since_last_payout": user.get("pointsSinceLastPayout", 0),
+            "money_to_pay": round(float(user.get("moneyToPay") or 0), 2),
+            "last_payout": f"{last_payout:%Y-%m-%d}" if last_payout else None,
+            "waiting_for_approval": [
+                {"title": w.get("title"), "points": w.get("points", 0), "date": w.get("date"),
+                 "completed_at": f"{c:%H:%M}" if (c := _local(w.get("completedAt"))) else None}
+                for w in user.get("waitingForApproval", [])
+            ],
+        })
+    report: dict[str, Any] = {
+        "today": raw.get("today"),
+        "point_to_money_rate": raw.get("pointToMoneyRate"),
+        "children": children,
+        "total_money_to_pay": round(sum(c["money_to_pay"] for c in children), 2),
+    }
+    if wanted and not children:
+        known = ", ".join(str(u.get("name")) for u in raw.get("users", [])) or "none"
+        report["hint"] = f"No child called {who!r} in Home-Board. Children: {known}."
+    return report
+
+
+def waiting_summary(raw: dict[str, Any]) -> list[str]:
+    """One line per child with chores waiting for approval, e.g. `Ola: 2 chores (20 points)`."""
+    lines = []
+    for user in raw.get("users", []):
+        waiting = user.get("waitingForApproval") or []
+        if waiting:
+            points = sum(int(w.get("points") or 0) for w in waiting)
+            lines.append(f"{user.get('name')}: {len(waiting)} chore{'s' if len(waiting) > 1 else ''} ({points} points)")
+    return lines
 
 
 def agenda_items(chores: list[Chore], today: dt.date) -> list[Item]:

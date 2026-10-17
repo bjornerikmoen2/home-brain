@@ -28,7 +28,7 @@ from . import briefing, frontmatter
 from .agenda import Note, as_moment, people
 from .agenda import build as build_agenda
 from .frontmatter import FrontmatterError
-from .homeboard import HomeBoard, HomeBoardError, agenda_items
+from .homeboard import HomeBoard, HomeBoardError, agenda_items, waiting_summary
 from .index import Index
 from .notify import Message, Notifier, NotifyError
 from .vault import Vault, VaultError
@@ -148,13 +148,18 @@ class Scheduler:
 
     def _tomorrow(self, notes: list[Note], today: dt.date) -> Message:
         day = today + dt.timedelta(days=1)
-        chores = []
+        chores, waiting = [], []
         if self._homeboard is not None:
+            # The rest of the briefing is still worth sending when Home-Board is down.
             try:
                 chores = agenda_items(self._homeboard.chores(day, day), today)
-            except HomeBoardError as exc:  # the rest of the briefing is still worth sending
+            except HomeBoardError as exc:
                 log.warning("tomorrow's briefing goes out without chores: %s", exc)
-        return briefing.tomorrow(build_agenda(notes, day, day, today, extra=chores), day)
+            try:
+                waiting = waiting_summary(self._homeboard.points())
+            except HomeBoardError as exc:
+                log.warning("tomorrow's briefing goes out without approvals: %s", exc)
+        return briefing.tomorrow(build_agenda(notes, day, day, today, extra=chores), day, waiting)
 
     def _week_ahead(self, notes: list[Note], today: dt.date) -> Message:
         start = today + dt.timedelta(days=1)

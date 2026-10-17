@@ -23,7 +23,7 @@ from .agenda import build as build_agenda
 from .auth import build_auth
 from .config import Settings
 from .gitsync import GitError, VaultGit
-from .homeboard import HomeBoard, HomeBoardError, agenda_items, chore_report
+from .homeboard import HomeBoard, HomeBoardError, agenda_items, chore_report, points_report
 from .index import Index
 from .notify import Message, Notifier, NotifyError, Ntfy, Priority
 from .scheduler import Scheduler
@@ -397,6 +397,23 @@ def create_server(
                 log.warning("chores failed: %s", exc)
                 raise ToolError("Home-Board could not be reached, so the chores are unknown right now") from exc
             return chore_report(found, now(), who)
+
+        @mcp.tool(annotations=READ_ONLY)
+        def scoreboard(
+            who: Annotated[str | None, Field(description="Only this child: name or note slug, e.g. 'ola'.")] = None,
+        ) -> dict[str, Any]:
+            """Points from Home-Board per child: the scoreboard total, points earned this week and this
+            month, the next payout (`money_to_pay`, in the family's currency at `point_to_money_rate`)
+            and done chores still waiting for a parent's approval (their points count once approved).
+            Use it for "how many points does Ola have?", "how much allowance do I owe the kids?" or
+            "which chores do I need to approve?". Approving and paying out happen in Home-Board itself.
+            """
+            try:
+                raw = homeboard.points()
+            except HomeBoardError as exc:
+                log.warning("scoreboard failed: %s", exc)
+                raise ToolError("Home-Board could not be reached, so the points are unknown right now") from exc
+            return points_report(raw, who)
 
     if run_scheduler and notifier is not None:
         Scheduler(

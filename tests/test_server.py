@@ -168,7 +168,7 @@ async def test_notify_tool(settings: Settings, notifier: FakeNotifier) -> None:
 async def test_chores_tool_and_chores_in_agenda(settings: Settings, frozen_time: None) -> None:
     homeboard = FakeHomeBoard()
     async with Client(create_server(settings, homeboard=homeboard)) as client:
-        assert "chores" in {t.name for t in await client.list_tools()}
+        assert {"chores", "scoreboard"} <= {t.name for t in await client.list_tools()}
         report = await call(client, "chores", who="ola")
         [monday] = report["days"]
         assert [(p["name"], p["summary"]) for p in monday["people"]] == [("Ola", "1 of 2 done")]
@@ -180,6 +180,17 @@ async def test_chores_tool_and_chores_in_agenda(settings: Settings, frozen_time:
         assert next(i for i in tomorrow["items"] if i["title"] == "Make bed")["who"] == ["ola"]
         assert (await call(client, "agenda", start="today", days=30))["days"][0]["items"][0]["kind"] != "chore"
     assert homeboard.calls == [(dt.date(2026, 10, 19), dt.date(2026, 10, 19)), (dt.date(2026, 10, 20), dt.date(2026, 10, 20))]
+
+
+async def test_scoreboard_tool(settings: Settings) -> None:
+    async with Client(create_server(settings, homeboard=FakeHomeBoard())) as client:
+        report = await call(client, "scoreboard", who="nora")
+        [nora] = report["children"]
+        assert (nora["scoreboard_points"], nora["money_to_pay"]) == (10, 5.0)
+        assert [w["title"] for w in nora["waiting_for_approval"]] == ["Feed the cat"]
+    async with Client(create_server(settings, homeboard=FakeHomeBoard(error="down"))) as client:
+        with pytest.raises(ToolError, match="Home-Board could not be reached"):
+            await client.call_tool("scoreboard", {})
 
 
 async def test_agenda_without_home_board(settings: Settings, frozen_time: None) -> None:

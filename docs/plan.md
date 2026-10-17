@@ -127,6 +127,7 @@ Keep the surface small and generic; domain logic lives in conventions + `agenda`
 | `delete_note(path)` | Soft delete: move to `.trash/` |
 | `agenda(from, to, who?)` | Everything dated in range: events, recurring, birthdays, due, reminders, and home-board chores (up to 7 days) |
 | `chores(day?, who?, days?)` | home-board chores per person: done, still to do, shared |
+| `scoreboard(who?)` | home-board points per child, next payout, chores waiting for approval |
 | `remind(at, text, who?)` | Add a reminder (written to `reminders.md`) |
 | `notify(text, title?, priority?)` | Push immediately via ntfy |
 
@@ -235,7 +236,9 @@ Notes:
   (`Integrations__ApiKey`) instead of a user login, so home-brain can read chores but not change
   anything. The containers talk over the `proxy` network.
 - Done: `chores(day?, who?, days?)`; `agenda` (up to 7 days) and the evening briefing list chores.
-- Later: `scoreboard()` (points), maybe `award_points(who, points, reason)` (needs write access).
+- Done: `scoreboard(who?)` from `GET /api/integrations/points`: points, next payout, chores waiting
+  for approval (also in the evening briefing).
+- Maybe later: `award_points(who, points, reason)` and approving chores (needs a separate write key).
 - Optional: home-board scoreboard tablet shows a "Tomorrow" panel from a read-only home-brain
   endpoint (Flutter change in home-board).
 
@@ -293,7 +296,8 @@ evening briefing arrives daily.
 
 ### Phase 4 — Extras
 - [x] home-board chores: `chores` tool, chores in `agenda` and the evening briefing
-- [ ] home-board points: `scoreboard`, maybe `award_points`
+- [x] home-board points: `scoreboard` (read-only, same key); approvals waiting in the evening briefing
+- [ ] Maybe: `award_points` / approving chores from Claude (needs a separate write key)
 - [ ] Two-way chat channel (Slack/Telegram/WhatsApp) using Claude API + the same tools
 - [ ] Access for other household members, with private folders
 - [ ] Semantic search (sqlite-vec) — only if keyword search proves insufficient

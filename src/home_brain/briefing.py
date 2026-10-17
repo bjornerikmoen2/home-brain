@@ -40,19 +40,23 @@ def reminder(text: str, who: list[str], due: dt.datetime, now: dt.datetime) -> M
     return Message(text, title=title, priority="high", tags=("bell",))
 
 
-def tomorrow(agenda: dict[str, Any], day: dt.date) -> Message:
+def tomorrow(agenda: dict[str, Any], day: dt.date, waiting: list[str] | None = None) -> Message:
+    """The evening briefing. `waiting` lists the chores done today that a parent hasn't approved
+    yet (from Home-Board), so the points can be approved before the day is over."""
     title = f"Tomorrow: {day:%A} {day.day} {day:%B}"
     entry = next((d for d in agenda["days"] if d["date"] == day.isoformat()), None)
+    approve = ["", "Waiting for your approval:", *waiting] if waiting else []
     if entry is None:
         # Sent anyway: a quiet evening shows that the briefing still works.
-        return Message("Nothing on the agenda.", title=title, priority="low", tags=("calendar",))
+        text = "\n".join(["Nothing on the agenda.", *approve])
+        return Message(text, title=title, priority="default" if waiting else "low", tags=("calendar",))
     lines = [line(item) for item in entry["items"] if item["kind"] != "chore"]
     if entry.get("bring"):
         lines += ["", "Bring:"]
         lines += [f"{capitalize(names([who]))}: {', '.join(things)}" for who, things in entry["bring"].items()]
     if chores := _chores_by_person([i for i in entry["items"] if i["kind"] == "chore"]):
         lines += ["", "Chores:", *chores]
-    return Message("\n".join(lines).strip(), title=title, tags=("calendar",))
+    return Message("\n".join(lines + approve).strip(), title=title, tags=("calendar",))
 
 
 def week_ahead(agenda: dict[str, Any], start: dt.date, end: dt.date) -> Message:

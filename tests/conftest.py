@@ -28,6 +28,21 @@ CHORES = [
 ]
 """Chores as home-board would report them for Monday 19 and Tuesday 20 October 2026."""
 
+POINTS = {
+    "timezone": "Europe/Oslo",
+    "today": "2026-10-19",
+    "pointToMoneyRate": 0.5,
+    "users": [
+        {"name": "Nora", "scoreboardPoints": 10, "pointsSinceLastPayout": 10, "moneyToPay": 5.0, "lastPayoutAt": None,
+         "earnedThisWeek": 15, "earnedThisMonth": 15,
+         "waitingForApproval": [{"date": "2026-10-19", "title": "Feed the cat", "points": 10,
+                                 "completedAt": "2026-10-19T06:00:00Z"}]},
+        {"name": "Ola", "scoreboardPoints": 30, "pointsSinceLastPayout": 30, "moneyToPay": 15.0,
+         "lastPayoutAt": "2026-10-01T18:00:00Z", "earnedThisWeek": 20, "earnedThisMonth": 30, "waitingForApproval": []},
+    ],
+}
+"""Points as home-board would report them on Monday 19 October 2026."""
+
 
 class FakeHomeBoard:
     def __init__(self, chores: list[Chore] = CHORES, error: str | None = None) -> None:
@@ -40,6 +55,11 @@ class FakeHomeBoard:
         if self.error:
             raise HomeBoardError(self.error)
         return [c for c in self._chores if start <= c.date <= end]
+
+    def points(self) -> dict:
+        if self.error:
+            raise HomeBoardError(self.error)
+        return POINTS
 
 
 class FakeNotifier:

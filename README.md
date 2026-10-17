@@ -73,7 +73,10 @@ see [docs/deploy.md](docs/deploy.md).
 | `notify` | Push a message to the phone right now (only when ntfy is configured) |
 | `chores` | The chores from [Home-Board](https://github.com/bjornerikmoen2/home-board) per person: done and still to do, plus shared ones (only when Home-Board is configured) |
 
-With Home-Board configured, `agenda` (up to 7 days) and the evening briefing also list the chores.
+| `scoreboard` | Points per child from Home-Board: scoreboard total, this week and month, the next payout, chores waiting for a parent's approval |
+
+With Home-Board configured, `agenda` (up to 7 days) and the evening briefing also list the chores,
+and the evening briefing says which done chores are waiting for approval.
 
 Dates in `events`, `recurring`, `due`, `reminders` and `birthday` are validated when a note is
 saved; see the vault's `_conventions.md` for the fields, including `cancels` (skip a routine item

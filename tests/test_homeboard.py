@@ -8,9 +8,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from conftest import CHORES, MON, TUE
+from conftest import CHORES, MON, POINTS, TUE
 
-from home_brain.homeboard import HomeBoard, HomeBoardError, agenda_items, chore_report, slug
+from home_brain.homeboard import (
+    HomeBoard,
+    HomeBoardError,
+    agenda_items,
+    chore_report,
+    points_report,
+    slug,
+    waiting_summary,
+)
 
 KEY = "test-key"
 
@@ -26,10 +34,12 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         self.server.requests.append(query)
-        if url.path != "/api/integrations/chores":
+        if url.path not in ("/api/integrations/chores", "/api/integrations/points"):
             self._send(404, {})
         elif self.headers.get("X-Api-Key") != KEY:
             self._send(401, {})
+        elif url.path.endswith("/points"):
+            self._send(200, POINTS)
         else:
             self._send(200, {"timezone": "Europe/Oslo", "today": query["startDate"], "chores": [{
                 "date": query["startDate"], "title": "Make bed", "points": 5, "schedule": "daily",
@@ -128,6 +138,34 @@ def test_agenda_items_list_any_day_chores_only_today() -> None:
     dishwasher = next(i for i in items if i.title == "Empty dishwasher" and i.date == TUE)
     assert (dishwasher.kind, dishwasher.who, dishwasher.extra) == ("chore", [], {"status": "todo", "shared_by": "kids"})
     assert next(i for i in items if i.title == "Make bed" and i.date == TUE).time == "08:00"
+
+
+def test_reads_points(server: FakeHomeBoardServer) -> None:
+    assert HomeBoard(url(server), KEY).points() == POINTS
+    assert server.requests == [{}]
+
+
+def test_points_report() -> None:
+    report = points_report(POINTS)
+    assert (report["today"], report["point_to_money_rate"], report["total_money_to_pay"]) == ("2026-10-19", 0.5, 20.0)
+    nora, ola = report["children"]
+    assert (ola["name"], ola["who"], ola["scoreboard_points"], ola["earned_this_week"], ola["money_to_pay"]) == ("Ola", "ola", 30, 20, 15.0)
+    assert ola["last_payout"] == f"{dt.datetime(2026, 10, 1, 18, tzinfo=dt.UTC).astimezone():%Y-%m-%d}"
+    completed = f"{dt.datetime(2026, 10, 19, 6, tzinfo=dt.UTC).astimezone():%H:%M}"
+    assert nora["waiting_for_approval"] == [{"title": "Feed the cat", "points": 10, "date": "2026-10-19", "completed_at": completed}]
+    assert nora["last_payout"] is None
+
+
+def test_points_report_for_one_child() -> None:
+    assert [c["name"] for c in points_report(POINTS, who="ola")["children"]] == ["Ola"]
+    unknown = points_report(POINTS, who="kari")
+    assert unknown["children"] == []
+    assert unknown["hint"] == "No child called 'kari' in Home-Board. Children: Nora, Ola."
+
+
+def test_waiting_summary() -> None:
+    assert waiting_summary(POINTS) == ["Nora: 1 chore (10 points)"]
+    assert waiting_summary({"users": [{"name": "Ola", "waitingForApproval": [{"points": 5}, {"points": 10}]}]}) == ["Ola: 2 chores (15 points)"]
 
 
 def test_slug() -> None:
