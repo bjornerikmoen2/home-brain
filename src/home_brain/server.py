@@ -21,6 +21,7 @@ from . import __version__, frontmatter
 from .agenda import Item, Note, as_date, as_moment
 from .agenda import build as build_agenda
 from .auth import build_auth
+from .calendars import Calendars
 from .config import Settings
 from .gitsync import GitError, VaultGit
 from .homeboard import HomeBoard, HomeBoardError, agenda_items, chore_report, points_report
@@ -123,10 +124,12 @@ def create_server(
     notifier: Notifier | None = None,
     run_scheduler: bool = False,
     homeboard: HomeBoard | None = None,
+    calendars: Calendars | None = None,
 ) -> FastMCP:
     """The MCP server. With a notifier (from NTFY_URL unless given), it also has the `notify` tool,
     and `run_scheduler` starts pushing reminders and briefings in the background. With home-board
-    (from HOMEBOARD_URL unless given) it has the `chores` tool and chores in `agenda`."""
+    (from HOMEBOARD_URL unless given) it has the `chores` tool and chores in `agenda`. With
+    calendars (from CALENDAR_URLS unless given) their events are in `agenda` and the briefings."""
     vault = open_vault(settings)
     index = Index(vault, settings.data_path / "index.db")
     stats = index.refresh(force=True)
@@ -137,6 +140,9 @@ def create_server(
     homeboard = homeboard or HomeBoard.from_settings(settings)
     if homeboard is None:
         log.info("chores are off (HOMEBOARD_URL is not set)")
+    calendars = calendars or Calendars.from_settings(settings)
+    if calendars is None:
+        log.info("calendar events are off (CALENDAR_URLS is not set)")
 
     def chore_items(first: dt.date, last: dt.date) -> tuple[list[Item], str | None]:
         if homeboard is None:
@@ -287,6 +293,10 @@ def create_server(
         the same folder (school holidays), and on days with an event whose `cancels` text appears in
         their title (e.g. an event {date: ..., title: PE cancelled, cancels: PE}).
 
+        Without a `folder` it also lists the family's calendar events (source `calendar`; daily or
+        weekly ones as kind `recurring`), merged into a note's item when both have the same title
+        that day. Calendar events have no `who`, so a `who` filter leaves them out.
+
         For up to 7 days (and no `folder`) it also lists the chores from Home-Board (kind `chore`,
         with their `status`); the `chores` tool tells who has done what.
         """
@@ -295,10 +305,16 @@ def create_server(
             folder_rel = vault.folder_path(folder)[0]
         last = first + dt.timedelta(days=days - 1)
         notes = [Note(path, title, meta) for path, title, meta in index.frontmatter(folder_rel)]
-        extra, warning = chore_items(first, last) if days <= CHORE_DAYS and not folder_rel else ([], None)
+        extra, warnings = [], []
+        if calendars is not None and not folder_rel:
+            extra, warnings = calendars.items(first, last)
+        if days <= CHORE_DAYS and not folder_rel:
+            chores, warning = chore_items(first, last)
+            extra += chores
+            warnings += [warning] if warning else []
         result = build_agenda(notes, first, last, today(), who, extra)
-        if warning:
-            result["warnings"] = [warning]
+        if warnings:
+            result["warnings"] = warnings
         return result
 
     @mcp.tool(annotations=EDIT)
@@ -417,7 +433,8 @@ def create_server(
 
     if run_scheduler and notifier is not None:
         Scheduler(
-            vault, index, notifier, settings.data_path / "scheduler.db", settings.briefing_time, homeboard=homeboard
+            vault, index, notifier, settings.data_path / "scheduler.db", settings.briefing_time,
+            homeboard=homeboard, calendars=calendars,
         ).start()
 
     @mcp.custom_route("/health", methods=["GET"])

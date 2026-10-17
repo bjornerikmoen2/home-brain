@@ -25,8 +25,9 @@ from pathlib import Path
 from typing import Any
 
 from . import briefing, frontmatter
-from .agenda import Note, as_moment, people
+from .agenda import Item, Note, as_moment, people
 from .agenda import build as build_agenda
+from .calendars import Calendars
 from .frontmatter import FrontmatterError
 from .homeboard import HomeBoard, HomeBoardError, agenda_items, waiting_summary
 from .index import Index
@@ -61,11 +62,13 @@ class Scheduler:
         briefing_time: dt.time = dt.time(19, 0),
         clock: Callable[[], dt.datetime] = dt.datetime.now,
         homeboard: HomeBoard | None = None,
+        calendars: Calendars | None = None,
     ) -> None:
         self._vault = vault
         self._index = index
         self._notifier = notifier
         self._homeboard = homeboard
+        self._calendars = calendars
         self._clock = clock
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -148,23 +151,32 @@ class Scheduler:
 
     def _tomorrow(self, notes: list[Note], today: dt.date) -> Message:
         day = today + dt.timedelta(days=1)
-        chores, waiting = [], []
+        extra, warnings = self._events(day, day)
+        waiting = []
         if self._homeboard is not None:
             # The rest of the briefing is still worth sending when Home-Board is down.
             try:
-                chores = agenda_items(self._homeboard.chores(day, day), today)
+                extra += agenda_items(self._homeboard.chores(day, day), today)
             except HomeBoardError as exc:
                 log.warning("tomorrow's briefing goes out without chores: %s", exc)
+                warnings.append("Home-Board could not be reached, so the chores are missing.")
             try:
                 waiting = waiting_summary(self._homeboard.points())
             except HomeBoardError as exc:
                 log.warning("tomorrow's briefing goes out without approvals: %s", exc)
-        return briefing.tomorrow(build_agenda(notes, day, day, today, extra=chores), day, waiting)
+        return briefing.tomorrow(build_agenda(notes, day, day, today, extra=extra), day, waiting, warnings)
 
     def _week_ahead(self, notes: list[Note], today: dt.date) -> Message:
         start = today + dt.timedelta(days=1)
         end = start + dt.timedelta(days=6)
-        return briefing.week_ahead(build_agenda(notes, start, end, today), start, end)
+        extra, warnings = self._events(start, end)
+        return briefing.week_ahead(build_agenda(notes, start, end, today, extra=extra), start, end, warnings)
+
+    def _events(self, start: dt.date, end: dt.date) -> tuple[list[Item], list[str]]:
+        """Calendar events (e.g. Google Calendar) and why any are missing."""
+        if self._calendars is None:
+            return [], []
+        return self._calendars.items(start, end)
 
     def _maintenance(self, notes: list[Note], today: dt.date) -> Message | None:
         return briefing.maintenance(notes, today, self._body)

@@ -92,6 +92,11 @@ Use the `remind` tool; the reminder is stored in `reminders.md`, shows up in `ag
 pushed to the phone at its time (a date without a time at 08:00). For "in 20 minutes" pass
 `at: "+20m"`. To send something to the phone right now, use `notify`.
 
+**Calendar**
+`agenda` also lists the family calendar's events (`"source": "calendar"`). They live in the
+calendar, so don't copy them into notes; add a note only for details the calendar lacks (what to
+bring, who goes), with the same title so `agenda` shows them as one item.
+
 **Chores**
 The kids' chores and points live in Home-Board, not in the vault: don't make notes for them. Use
 the `chores` tool for "has Ola done her chores?" (`agenda` lists them too) and `scoreboard` for

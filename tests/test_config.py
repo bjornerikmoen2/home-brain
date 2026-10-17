@@ -24,7 +24,7 @@ NTFY_ENV = {
 
 def env(monkeypatch: pytest.MonkeyPatch, values: dict[str, str]) -> None:
     for key in (*GITHUB_ENV, *NTFY_ENV, "HOMEBOARD_URL", "HOMEBOARD_API_KEY", "VAULT_PATH", "DATA_PATH", "VAULT_GIT",
-                "OAUTH_JWT_SIGNING_KEY"):
+                "OAUTH_JWT_SIGNING_KEY", "CALENDAR_URLS"):
         monkeypatch.delenv(key, raising=False)
     for key, value in values.items():
         monkeypatch.setenv(key, value)
@@ -53,6 +53,17 @@ def test_homeboard_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings.from_env()
     assert settings.homeboard_url == "http://home-board-api:8080"
     assert "s3cret-key" not in repr(settings)
+
+
+def test_calendar_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    env(monkeypatch, {"CALENDAR_URLS": " https://calendar.example.com/a/private-1/basic.ics,\n webcal://example.com/b.ics "})
+    settings = Settings.from_env()
+    assert settings.calendar_urls == ("https://calendar.example.com/a/private-1/basic.ics", "https://example.com/b.ics")
+    assert "private-1" not in repr(settings)
+    env(monkeypatch, {"CALENDAR_URLS": "https://example.com/a.ics calendar.example.com/private-2/basic.ics"})
+    with pytest.raises(ConfigError, match="address 2 must be a full https:// iCal address") as caught:
+        Settings.from_env()
+    assert "private-2" not in str(caught.value)
 
 
 @pytest.mark.parametrize(

@@ -40,16 +40,20 @@ def reminder(text: str, who: list[str], due: dt.datetime, now: dt.datetime) -> M
     return Message(text, title=title, priority="high", tags=("bell",))
 
 
-def tomorrow(agenda: dict[str, Any], day: dt.date, waiting: list[str] | None = None) -> Message:
+def tomorrow(
+    agenda: dict[str, Any], day: dt.date, waiting: list[str] | None = None, warnings: list[str] | None = None
+) -> Message:
     """The evening briefing. `waiting` lists the chores done today that a parent hasn't approved
-    yet (from Home-Board), so the points can be approved before the day is over."""
+    yet (from Home-Board), so the points can be approved before the day is over. `warnings` say
+    what is missing because a calendar or Home-Board could not be read."""
     title = f"Tomorrow: {day:%A} {day.day} {day:%B}"
     entry = next((d for d in agenda["days"] if d["date"] == day.isoformat()), None)
     approve = ["", "Waiting for your approval:", *waiting] if waiting else []
+    approve += _warnings(warnings)
     if entry is None:
         # Sent anyway: a quiet evening shows that the briefing still works.
         text = "\n".join(["Nothing on the agenda.", *approve])
-        return Message(text, title=title, priority="default" if waiting else "low", tags=("calendar",))
+        return Message(text, title=title, priority="default" if waiting or warnings else "low", tags=("calendar",))
     lines = [line(item) for item in entry["items"] if item["kind"] != "chore"]
     if entry.get("bring"):
         lines += ["", "Bring:"]
@@ -59,7 +63,7 @@ def tomorrow(agenda: dict[str, Any], day: dt.date, waiting: list[str] | None = N
     return Message("\n".join(lines + approve).strip(), title=title, tags=("calendar",))
 
 
-def week_ahead(agenda: dict[str, Any], start: dt.date, end: dt.date) -> Message:
+def week_ahead(agenda: dict[str, Any], start: dt.date, end: dt.date, warnings: list[str] | None = None) -> Message:
     """What's special in the coming week. Weekly routines and chores are left out: the evening
     briefings cover them, and listing every PE lesson would bury the news."""
     title = f"Week ahead: {start.day} {start:%b} – {end.day} {end:%b}"
@@ -68,9 +72,10 @@ def week_ahead(agenda: dict[str, Any], start: dt.date, end: dt.date) -> Message:
         items = [i for i in entry["items"] if i["kind"] not in ("recurring", "chore")]
         if items:
             lines.append(f"{short_day(as_date(entry['date']))}: " + "; ".join(line(i) for i in items))
-    if not lines:
+    if not lines and not warnings:
         return Message("Only the usual routine this week.", title=title, priority="low", tags=("spiral_calendar",))
-    return Message("\n".join(lines), title=title, tags=("spiral_calendar",))
+    lines = lines or ["Only the usual routine this week."]
+    return Message("\n".join(lines + _warnings(warnings)), title=title, tags=("spiral_calendar",))
 
 
 def maintenance(notes: list[Note], today: dt.date, read_body: Callable[[str], str]) -> Message | None:
@@ -153,6 +158,10 @@ def _tires(note: Note, today: dt.date) -> list[str]:
             studs = f" Studs must be off after {short_day(studs_off)}." if studded and today <= studs_off else ""
             found.append(f"{car}: time to change to summer tires?{since}{studs}")
     return found
+
+
+def _warnings(warnings: list[str] | None) -> list[str]:
+    return ["", *(f"⚠ {w}" for w in warnings)] if warnings else []
 
 
 def _chores_by_person(chores: list[dict[str, Any]]) -> list[str]:

@@ -206,6 +206,30 @@ which takes a shared key instead of a user login, so home-brain can't change any
 The containers talk over the `proxy` network, so the key never leaves the server. People are
 matched by name: Home-Board's display name "Ola" is the vault's `ola`.
 
+## 8. Calendar events (optional)
+
+Events from the family's Google Calendar (or any calendar with an iCal address) show up in
+`agenda`, the evening briefing and the week ahead. home-brain reads the calendar's secret iCal
+address, so it needs no Google login and can't change the calendar.
+
+1. In Google Calendar on a computer: *Settings* → the calendar under *Settings for my calendars*
+   → *Integrate calendar* → copy *Secret address in iCal format*. Anyone with this address can
+   read the calendar; if it leaks, *Reset* it there and update `.env`.
+2. Add it to `/opt/docker/home-brain/.env` (several calendars: separate the addresses with
+   spaces), then `docker compose up -d` in `/opt/docker/home-brain`:
+
+   ```bash
+   CALENDAR_URLS=https://calendar.google.com/calendar/ical/.../private-.../basic.ics
+   ```
+
+3. Check: `docker logs home-brain` no longer says `calendar events are off`, and `agenda` for a
+   day with a calendar event lists it with `"source": "calendar"`.
+
+Events repeating daily or weekly count as routine (kind `recurring`), so the week ahead leaves them
+out. An event with the same title and time as an item in a note is shown once, with the note's
+details. Feeds are fetched at most every 5 minutes; if one can't be read, the agenda and the
+briefing say so instead of silently leaving its events out.
+
 ## Troubleshooting
 
 | Symptom | Check |

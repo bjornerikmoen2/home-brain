@@ -54,6 +54,9 @@ class Settings:
     homeboard_api_key: str | None = field(default=None, repr=False)
     """home-board's Integrations:ApiKey."""
 
+    calendar_urls: tuple[str, ...] = field(default=(), repr=False)
+    """Secret iCal addresses of calendars (e.g. Google Calendar) whose events join the agenda."""
+
     @classmethod
     def from_env(cls) -> Settings:
         env = os.environ
@@ -77,6 +80,7 @@ class Settings:
             briefing_time=parse_time("BRIEFING_TIME", env.get("BRIEFING_TIME") or "19:00"),
             homeboard_url=env.get("HOMEBOARD_URL") or None,
             homeboard_api_key=env.get("HOMEBOARD_API_KEY") or None,
+            calendar_urls=parse_urls(env.get("CALENDAR_URLS", "")),
         )
         settings.validate()
         return settings
@@ -94,6 +98,11 @@ class Settings:
                 raise ConfigError(f"HOMEBOARD_URL must be a full URL like http://home-board-api:8080, not {self.homeboard_url!r}")
             if not self.homeboard_api_key:
                 raise ConfigError("HOMEBOARD_URL needs HOMEBOARD_API_KEY (home-board's Integrations__ApiKey)")
+        for number, address in enumerate(self.calendar_urls, 1):
+            url = urlparse(address)
+            if url.scheme not in ("https", "http") or not url.netloc:
+                # The address is a secret: say which one, not what it is.
+                raise ConfigError(f"CALENDAR_URLS: address {number} must be a full https:// iCal address")
         if self.auth_provider not in ("none", "github"):
             raise ConfigError(f"AUTH_PROVIDER must be 'none' or 'github', not {self.auth_provider!r}")
         if self.auth_provider == "none":
@@ -120,6 +129,12 @@ class Settings:
 
 def parse_users(value: str) -> frozenset[str]:
     return frozenset(u.strip().lstrip("@").lower() for u in value.split(",") if u.strip())
+
+
+def parse_urls(value: str) -> tuple[str, ...]:
+    """Addresses separated by commas, spaces or newlines; webcal:// is read as https://."""
+    urls = (u.strip() for u in re.split(r"[,\s]+", value) if u.strip())
+    return tuple("https://" + u[len("webcal://"):] if u.lower().startswith("webcal://") else u for u in urls)
 
 
 def parse_time(name: str, value: str) -> dt.time:

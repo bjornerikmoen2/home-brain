@@ -288,7 +288,7 @@ and shows up as a commit in GitHub.
 - [x] ntfy container + auth; `notify` tool
 - [x] Scheduler: due reminders, 19:00 tomorrow briefing, Sunday week-ahead, Monday maintenance
 - [x] `remind` accepts times relative to now (`+15m`), since Claude doesn't always know the time
-- [ ] Deploy: `ntfy.<domain>` tunnel hostname, ntfy users and token, phone app
+- [x] Deploy: `ntfy.<domain>` tunnel hostname, ntfy users and token, phone app
 - [ ] Later, if wanted: Claude API phrasing for briefings (fixed templates for now)
 
 **Done when:** a reminder added from the Claude app arrives as a push at the right time, and the
@@ -297,6 +297,8 @@ evening briefing arrives daily.
 ### Phase 4 — Extras
 - [x] home-board chores: `chores` tool, chores in `agenda` and the evening briefing
 - [x] home-board points: `scoreboard` (read-only, same key); approvals waiting in the evening briefing
+- [x] Calendar events (Google Calendar's secret iCal address) in `agenda`, the evening briefing and
+      the week ahead; a feed that can't be read is mentioned instead of silently missing
 - [ ] Maybe: `award_points` / approving chores from Claude (needs a separate write key)
 - [ ] Two-way chat channel (Slack/Telegram/WhatsApp) using Claude API + the same tools
 - [ ] Access for other household members, with private folders

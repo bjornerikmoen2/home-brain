@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import AsyncIterator
 
 import pytest
-from conftest import FakeHomeBoard, FakeNotifier
+from conftest import FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
@@ -191,6 +191,23 @@ async def test_scoreboard_tool(settings: Settings) -> None:
     async with Client(create_server(settings, homeboard=FakeHomeBoard(error="down"))) as client:
         with pytest.raises(ToolError, match="Home-Board could not be reached"):
             await client.call_tool("scoreboard", {})
+
+
+async def test_agenda_with_calendar_events(settings: Settings, frozen_time: None) -> None:
+    async with Client(create_server(settings, calendars=fake_calendars())) as client:
+        week = await call(client, "agenda", start="2026-10-19", days=7)
+        by_day = {d["date"]: [(i["title"], i["source"]) for i in d["items"]] for d in week["days"]}
+        assert ("Football practice (late)", "calendar") in by_day["2026-10-20"]
+        assert ("Cabin weekend", "calendar") in by_day["2026-10-23"]
+        # In the calendar and in a note: listed once, as the note's item.
+        assert by_day["2026-10-24"] == [("Per's birthday party", "events/2026-10-24-per-birthday-party.md")]
+        assert "warnings" not in week
+        # Folders are about notes; calendar events don't belong to one.
+        school = await call(client, "agenda", start="2026-10-20", folder="school")
+        assert [i["source"] for d in school["days"] for i in d["items"]] == ["school/ola/_weekly.md"]
+    async with Client(create_server(settings, calendars=fake_calendars(FakeFeeds({})))) as client:
+        result = await call(client, "agenda", start="tomorrow")
+        assert result["warnings"] == ["Calendar 'calendar 1' could not be read: the feed is not a valid iCal file"]
 
 
 async def test_agenda_without_home_board(settings: Settings, frozen_time: None) -> None:

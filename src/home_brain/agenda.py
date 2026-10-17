@@ -224,8 +224,9 @@ def build(
     extra: Iterable[Item] = (),
 ) -> dict[str, Any]:
     """Everything dated between start and end (inclusive), grouped by day. `extra` adds items
-    from outside the vault, such as chores from home-board."""
-    items: list[Item] = [i for i in extra if start <= i.date <= end]
+    from outside the vault, such as chores from home-board and calendar events."""
+    outside = [i for i in extra if start <= i.date <= end]
+    items: list[Item] = []
     upcoming: list[Item] = []
     problems: list[str] = []
     breaks: list[tuple[str, dt.date, dt.date]] = []  # (folder, first, last)
@@ -301,6 +302,20 @@ def build(
         if twin:
             twin.bring += [b for b in item.bring if b not in twin.bring]
             twin.time = twin.time or item.time
+            twin.where = twin.where or item.where
+            continue
+        items.append(item)
+
+    for item in outside:
+        # The same appointment in a calendar and in a note: one item, with the note's details first.
+        twin = None if item.kind == "chore" else next(
+            (v for v in items if v.source.endswith(".md") and v.date == item.date and _same_title(v.title, item.title)
+             and not (v.time and item.time and v.time != item.time)),
+            None,
+        )
+        if twin:
+            twin.time = twin.time or item.time
+            twin.end_time = twin.end_time or item.end_time
             twin.where = twin.where or item.where
             continue
         items.append(item)

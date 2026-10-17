@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
+from home_brain.calendars import Calendars
 from home_brain.config import Settings
 from home_brain.homeboard import Chore, HomeBoardError
 from home_brain.index import Index
@@ -101,3 +103,84 @@ def settings(tmp_path: Path) -> Settings:
     settings = Settings(vault_path=tmp_path / "vault", data_path=tmp_path / "data", vault_git=False)
     Vault(settings.vault_path).seed()
     return settings
+
+
+CALENDAR_ICS = b"""\
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Google Inc//Google Calendar 70.9054//EN
+X-WR-CALNAME:Family
+X-WR-TIMEZONE:Europe/Oslo
+BEGIN:VEVENT
+UID:football@example.com
+DTSTART;TZID=Europe/Oslo:20261013T170000
+DTEND;TZID=Europe/Oslo:20261013T183000
+RRULE:FREQ=WEEKLY;BYDAY=TU
+EXDATE;TZID=Europe/Oslo:20261027T170000
+SUMMARY:Football practice
+LOCATION:Eksempel stadion
+END:VEVENT
+BEGIN:VEVENT
+UID:football@example.com
+RECURRENCE-ID;TZID=Europe/Oslo:20261020T170000
+DTSTART;TZID=Europe/Oslo:20261020T180000
+DTEND;TZID=Europe/Oslo:20261020T193000
+SUMMARY:Football practice (late)
+END:VEVENT
+BEGIN:VEVENT
+UID:book-club@example.com
+DTSTART;TZID=Europe/Oslo:20260922T190000
+DTEND;TZID=Europe/Oslo:20260922T210000
+RRULE:FREQ=MONTHLY;BYDAY=4TH
+SUMMARY:Book club
+END:VEVENT
+BEGIN:VEVENT
+UID:dentist@example.com
+DTSTART:20261021T080000Z
+DTEND:20261021T090000Z
+SUMMARY:Dentist
+DESCRIPTION:<b>Bring</b> the health card<br>Room 2
+END:VEVENT
+BEGIN:VEVENT
+UID:cancelled@example.com
+DTSTART;TZID=Europe/Oslo:20261021T120000
+DTEND;TZID=Europe/Oslo:20261021T130000
+SUMMARY:Lunch
+STATUS:CANCELLED
+END:VEVENT
+BEGIN:VEVENT
+UID:cabin@example.com
+DTSTART;VALUE=DATE:20261023
+DTEND;VALUE=DATE:20261026
+SUMMARY:Cabin weekend
+END:VEVENT
+BEGIN:VEVENT
+UID:party@example.com
+DTSTART;TZID=Europe/Oslo:20261024T140000
+DTEND;TZID=Europe/Oslo:20261024T170000
+SUMMARY:Per's birthday party
+LOCATION:Eksempelveien 12\\, 0123 Oslo
+END:VEVENT
+END:VCALENDAR
+"""
+"""A family calendar as Google Calendar exports it, around Monday 19 October 2026."""
+CALENDAR_URL = "https://calendar.example.com/calendar/ical/family/private-s3cret/basic.ics"
+
+
+class FakeFeeds:
+    """Serves calendar feeds by address and counts the downloads; `error` makes every one fail."""
+
+    def __init__(self, feeds: dict[str, bytes] | None = None, error: Exception | None = None) -> None:
+        self.feeds = {CALENDAR_URL: CALENDAR_ICS} if feeds is None else feeds
+        self.error = error
+        self.downloads = 0
+
+    def __call__(self, url: str) -> bytes:
+        self.downloads += 1
+        if self.error:
+            raise self.error
+        return self.feeds[url]
+
+
+def fake_calendars(feeds: FakeFeeds | None = None, urls: list[str] | None = None, **kwargs: object) -> Calendars:
+    return Calendars(urls or [CALENDAR_URL], fetch=feeds or FakeFeeds(), tz=ZoneInfo("Europe/Oslo"), **kwargs)

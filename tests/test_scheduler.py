@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from conftest import FakeHomeBoard, FakeNotifier
+from conftest import FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
 
 from home_brain.index import Index
 from home_brain.scheduler import Scheduler
@@ -110,7 +110,28 @@ def test_evening_briefing_with_chores(scheduler_for: Callable[..., Scheduler], n
 def test_evening_briefing_when_home_board_is_down(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
     scheduler = scheduler_for(notifier, homeboard=FakeHomeBoard(error="unreachable"))
     assert scheduler.tick(at(19, 19, 0)) == ["tomorrow:2026-10-19"]
-    assert "Chores" not in notifier.sent[0].text
+    assert "Chores:" not in notifier.sent[0].text
+    assert notifier.sent[0].text.endswith("\n\n⚠ Home-Board could not be reached, so the chores are missing.")
+
+
+def test_briefings_with_calendar_events(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
+    scheduler = scheduler_for(notifier, calendars=fake_calendars())
+    assert "tomorrow:2026-10-20" in scheduler.tick(at(20, 19, 0))
+    # Same title as the note's dentist visit, but another time: a different appointment.
+    assert notifier.sent[-1].text == "Reminder: Forest trip: rain gear\n09:00 Dentist (you)\n10:00–11:00 Dentist"
+    # The week ahead leaves out weekly events, like the vault's routines.
+    assert scheduler.tick(at(18, 18, 0)) == ["week-ahead:2026-10-18"]
+    week = notifier.sent[-1].text
+    assert "Football" not in week
+    assert "Thu 22 Oct: 19:00–21:00 Book club" in week
+
+
+def test_evening_briefing_when_the_calendar_is_down(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
+    scheduler = scheduler_for(notifier, calendars=fake_calendars(FakeFeeds({})))
+    assert "tomorrow:2026-10-20" in scheduler.tick(at(20, 19, 0))
+    assert notifier.sent[-1].text.endswith(
+        "09:00 Dentist (you)\n\n⚠ Calendar 'calendar 1' could not be read: the feed is not a valid iCal file"
+    )
 
 
 def test_briefing_time_and_weekly_jobs(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
