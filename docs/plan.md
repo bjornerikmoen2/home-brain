@@ -125,7 +125,8 @@ Keep the surface small and generic; domain logic lives in conventions + `agenda`
 | `patch_note(path, set_frontmatter?, append_to_list?, append_text?, under_heading?)` | Merge frontmatter / append to lists / append under a heading |
 | `move_note(path, new_path)` | Refile (e.g. out of `inbox/`) |
 | `delete_note(path)` | Soft delete: move to `.trash/` |
-| `agenda(from, to, who?)` | Everything dated in range: events, recurring, birthdays, due, reminders, (later) home-board chores |
+| `agenda(from, to, who?)` | Everything dated in range: events, recurring, birthdays, due, reminders, and home-board chores (up to 7 days) |
+| `chores(day?, who?, days?)` | home-board chores per person: done, still to do, shared |
 | `remind(at, text, who?)` | Add a reminder (written to `reminders.md`) |
 | `notify(text, title?, priority?)` | Push immediately via ntfy |
 
@@ -230,9 +231,11 @@ Notes:
 
 ## home-board integration (phase 4)
 
-- home-board gets a service user; home-brain calls its REST API.
-- Tools: `chores(who?, date?)`, `scoreboard()`, maybe `award_points(who, points, reason)`.
-- `agenda` merges today's chores so "what's on tomorrow" includes them.
+- home-board has a read-only `GET /api/integrations/chores` endpoint protected by a shared API key
+  (`Integrations__ApiKey`) instead of a user login, so home-brain can read chores but not change
+  anything. The containers talk over the `proxy` network.
+- Done: `chores(day?, who?, days?)`; `agenda` (up to 7 days) and the evening briefing list chores.
+- Later: `scoreboard()` (points), maybe `award_points(who, points, reason)` (needs write access).
 - Optional: home-board scoreboard tablet shows a "Tomorrow" panel from a read-only home-brain
   endpoint (Flutter change in home-board).
 
@@ -289,7 +292,8 @@ and shows up as a commit in GitHub.
 evening briefing arrives daily.
 
 ### Phase 4 — Extras
-- [ ] home-board tools + chores in `agenda`
+- [x] home-board chores: `chores` tool, chores in `agenda` and the evening briefing
+- [ ] home-board points: `scoreboard`, maybe `award_points`
 - [ ] Two-way chat channel (Slack/Telegram/WhatsApp) using Claude API + the same tools
 - [ ] Access for other household members, with private folders
 - [ ] Semantic search (sqlite-vec) — only if keyword search proves insufficient

@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import AsyncIterator
 
 import pytest
-from conftest import FakeNotifier
+from conftest import FakeHomeBoard, FakeNotifier
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
@@ -134,14 +134,15 @@ async def test_remind_tool(client: Client, settings: Settings, frozen_time: None
     [("+5m", "2026-10-19T12:05"), ("+ 90M", "2026-10-19T13:30"), ("+2h", "2026-10-19T14:00"), ("+3d", "2026-10-22T12:00")],
 )
 async def test_remind_from_now(client: Client, frozen_time: None, at: str, expected: str) -> None:
-    assert (await call(client, "remind", at=at, text="Check the oven"))["reminder"]["at"] == expected
+    result = await call(client, "remind", at=at, text="Check the oven")
+    assert (result["reminder"]["at"], result["now"]) == (expected, "2026-10-19T12:00")
 
 
 @pytest.mark.parametrize(
     ("at", "message"),
     [
         ("+0m", "at must be"),
-        ("2026-10-19T11:00", "in the past"),
+        ("2026-10-19T11:00", r"in the past \(it is now 2026-10-19T12:00\)"),
         ("2026-10-18", "in the past"),
         ("next week", "at must be"),
         ("2026-10-20T25:00", "at must be"),
@@ -162,6 +163,32 @@ async def test_notify_tool(settings: Settings, notifier: FakeNotifier) -> None:
         with pytest.raises(ToolError, match="could not be sent"):
             await client.call_tool("notify", {"text": "Hello"})
     assert notifier.sent == [Message("Dinner is ready", title="Home")]
+
+
+async def test_chores_tool_and_chores_in_agenda(settings: Settings, frozen_time: None) -> None:
+    homeboard = FakeHomeBoard()
+    async with Client(create_server(settings, homeboard=homeboard)) as client:
+        assert "chores" in {t.name for t in await client.list_tools()}
+        report = await call(client, "chores", who="ola")
+        [monday] = report["days"]
+        assert [(p["name"], p["summary"]) for p in monday["people"]] == [("Ola", "1 of 2 done")]
+
+        tomorrow = (await call(client, "agenda", start="tomorrow"))["days"][0]
+        assert {(i["kind"], i["title"]) for i in tomorrow["items"]} == {
+            ("recurring", "Gym"), ("chore", "Make bed"), ("chore", "Empty dishwasher"),
+        }
+        assert next(i for i in tomorrow["items"] if i["title"] == "Make bed")["who"] == ["ola"]
+        assert (await call(client, "agenda", start="today", days=30))["days"][0]["items"][0]["kind"] != "chore"
+    assert homeboard.calls == [(dt.date(2026, 10, 19), dt.date(2026, 10, 19)), (dt.date(2026, 10, 20), dt.date(2026, 10, 20))]
+
+
+async def test_agenda_without_home_board(settings: Settings, frozen_time: None) -> None:
+    async with Client(create_server(settings, homeboard=FakeHomeBoard(error="home-board is unreachable"))) as client:
+        result = await call(client, "agenda", start="tomorrow")
+        assert result["warnings"] == ["Chores are missing: home-board is unreachable"]
+        assert [i["title"] for i in result["days"][0]["items"]] == ["Gym"]
+        with pytest.raises(ToolError, match="Home-Board could not be reached"):
+            await client.call_tool("chores", {})
 
 
 async def test_empty_search_gives_a_hint(client: Client) -> None:

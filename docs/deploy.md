@@ -181,6 +181,31 @@ with a token, and the phone app logs in as you.
 Other services can use the same ntfy server, for example for backup alerts: give each its own
 topic, user and token.
 
+## 7. Chores from Home-Board (optional)
+
+With [Home-Board](https://github.com/bjornerikmoen2/home-board) on the same Docker host, home-brain
+answers "has Ola done her chores today?" (the `chores` tool) and lists chores in `agenda` and the
+evening briefing. It reads them from Home-Board's read-only `/api/integrations/chores` endpoint,
+which takes a shared key instead of a user login, so home-brain can't change anything there.
+
+1. Create the key on the server and add it to both `.env` files:
+
+   ```bash
+   KEY=$(openssl rand -hex 32)
+   echo "INTEGRATIONS_API_KEY=$KEY" >> /opt/docker/home-board/.env
+   printf 'HOMEBOARD_URL=http://home-board-api:8080\nHOMEBOARD_API_KEY=%s\n' "$KEY" >> /opt/docker/home-brain/.env
+   ```
+
+2. In Home-Board's compose file, the `api` service's `environment` needs the line
+   `Integrations__ApiKey: "${INTEGRATIONS_API_KEY:-}"` (its `docker-compose-ghcr.yml` has it).
+   Restart both: `docker compose up -d` in `/opt/docker/home-board`, then in
+   `/opt/docker/home-brain`.
+3. Check: `docker logs home-brain` no longer says `chores are off`, and Claude answers "which
+   chores are left today?".
+
+The containers talk over the `proxy` network, so the key never leaves the server. People are
+matched by name: Home-Board's display name "Ola" is the vault's `ola`.
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -195,3 +220,4 @@ topic, user and token.
 | No pushes | `docker logs home-brain`: `push notifications are off` means `NTFY_URL` is empty; `HTTP 403` means a wrong `NTFY_TOKEN` or missing write access to the topic; `unreachable` means the `ntfy` container is down |
 | The log says `sent`, but the phone shows nothing | The app's server is exactly `NTFY_PUBLIC_URL` (iOS relies on it for instant delivery), it is logged in, and it subscribed to `NTFY_TOPIC` |
 | No `notify` tool in Claude | `NTFY_URL` is empty; set it and restart home-brain |
+| `agenda` says `Chores are missing` | `docker logs home-brain`: `HTTP 401` means the two keys differ; `HTTP 404` means Home-Board has no `Integrations__ApiKey` (or is older than the endpoint); `unreachable` means `home-board-api` is down or not on the `proxy` network |

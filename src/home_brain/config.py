@@ -49,6 +49,11 @@ class Settings:
     briefing_time: dt.time = dt.time(19, 0)
     """When the evening briefing about tomorrow is pushed."""
 
+    homeboard_url: str | None = None
+    """home-board's API, e.g. http://home-board-api:8080; chores are off when unset."""
+    homeboard_api_key: str | None = field(default=None, repr=False)
+    """home-board's Integrations:ApiKey."""
+
     @classmethod
     def from_env(cls) -> Settings:
         env = os.environ
@@ -70,6 +75,8 @@ class Settings:
             ntfy_topic=env.get("NTFY_TOPIC") or "home-brain",
             ntfy_token=env.get("NTFY_TOKEN") or None,
             briefing_time=parse_time("BRIEFING_TIME", env.get("BRIEFING_TIME") or "19:00"),
+            homeboard_url=env.get("HOMEBOARD_URL") or None,
+            homeboard_api_key=env.get("HOMEBOARD_API_KEY") or None,
         )
         settings.validate()
         return settings
@@ -81,6 +88,12 @@ class Settings:
                 raise ConfigError(f"NTFY_URL must be a full URL like http://ntfy, not {self.ntfy_url!r}")
             if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", self.ntfy_topic):
                 raise ConfigError("NTFY_TOPIC may only contain letters, digits, '-' and '_' (at most 64)")
+        if self.homeboard_url:
+            url = urlparse(self.homeboard_url)
+            if url.scheme not in ("https", "http") or not url.netloc:
+                raise ConfigError(f"HOMEBOARD_URL must be a full URL like http://home-board-api:8080, not {self.homeboard_url!r}")
+            if not self.homeboard_api_key:
+                raise ConfigError("HOMEBOARD_URL needs HOMEBOARD_API_KEY (home-board's Integrations__ApiKey)")
         if self.auth_provider not in ("none", "github"):
             raise ConfigError(f"AUTH_PROVIDER must be 'none' or 'github', not {self.auth_provider!r}")
         if self.auth_provider == "none":

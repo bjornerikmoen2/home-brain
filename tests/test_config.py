@@ -23,7 +23,8 @@ NTFY_ENV = {
 
 
 def env(monkeypatch: pytest.MonkeyPatch, values: dict[str, str]) -> None:
-    for key in (*GITHUB_ENV, *NTFY_ENV, "VAULT_PATH", "DATA_PATH", "VAULT_GIT", "OAUTH_JWT_SIGNING_KEY"):
+    for key in (*GITHUB_ENV, *NTFY_ENV, "HOMEBOARD_URL", "HOMEBOARD_API_KEY", "VAULT_PATH", "DATA_PATH", "VAULT_GIT",
+                "OAUTH_JWT_SIGNING_KEY"):
         monkeypatch.delenv(key, raising=False)
     for key, value in values.items():
         monkeypatch.setenv(key, value)
@@ -47,6 +48,13 @@ def test_ntfy_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "tk_secret" not in repr(settings)
 
 
+def test_homeboard_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    env(monkeypatch, {"HOMEBOARD_URL": "http://home-board-api:8080", "HOMEBOARD_API_KEY": "s3cret-key"})
+    settings = Settings.from_env()
+    assert settings.homeboard_url == "http://home-board-api:8080"
+    assert "s3cret-key" not in repr(settings)
+
+
 @pytest.mark.parametrize(
     ("override", "message"),
     [
@@ -54,6 +62,8 @@ def test_ntfy_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         ({"NTFY_TOPIC": "family news"}, "NTFY_TOPIC may only contain"),
         ({"BRIEFING_TIME": "25:00"}, "BRIEFING_TIME must be a time"),
         ({"BRIEFING_TIME": "evening"}, "BRIEFING_TIME must be a time"),
+        ({"HOMEBOARD_URL": "home-board-api:8080", "HOMEBOARD_API_KEY": "k"}, "HOMEBOARD_URL must be a full URL"),
+        ({"HOMEBOARD_URL": "http://home-board-api:8080"}, "needs HOMEBOARD_API_KEY"),
     ],
 )
 def test_invalid_ntfy_settings(monkeypatch: pytest.MonkeyPatch, override: dict[str, str], message: str) -> None:

@@ -3,9 +3,11 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from conftest import CHORES
 
 from home_brain import briefing, frontmatter
 from home_brain.agenda import Note, build
+from home_brain.homeboard import agenda_items
 from home_brain.index import Index
 from home_brain.vault import Vault
 
@@ -27,6 +29,24 @@ def test_tomorrow_with_packing_list(notes: list[Note]) -> None:
     assert message.title == "Tomorrow: Saturday 24 October"
     assert message.text == "14:00 Per's birthday party (Ola), Eksempelveien 12\n\nBring:\nOla: present"
     assert message.priority == "default"
+
+
+def test_tomorrow_with_chores(notes: list[Note]) -> None:
+    day = dt.date(2026, 10, 20)
+    agenda = build(notes, day, day, MON, extra=agenda_items(CHORES, MON))
+    message = briefing.tomorrow(agenda, day)
+    assert message.text == (
+        "Gym (Ola)\n\nBring:\nOla: gym clothes, indoor shoes\n\n"
+        "Chores:\nOla: Make bed (by 08:00)\nKids (shared): Empty dishwasher"
+    )
+
+
+def test_chores_alone_and_not_in_the_week_ahead() -> None:
+    day = dt.date(2026, 10, 20)
+    chores = agenda_items(CHORES, MON)
+    assert briefing.tomorrow(build([], day, day, MON, extra=chores), day).text.startswith("Chores:\nOla: Make bed")
+    week = briefing.week_ahead(build([], MON, day, MON, extra=chores), MON, day)
+    assert week.text == "Only the usual routine this week."
 
 
 def test_tomorrow_with_nothing_on(notes: list[Note]) -> None:

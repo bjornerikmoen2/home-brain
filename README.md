@@ -71,6 +71,9 @@ see [docs/deploy.md](docs/deploy.md).
 | `agenda` | Everything dated for one or more days: events, weekly routines (RRULE), birthdays, deadlines and reminders, with a per-person packing list; plus upcoming deadlines within their warning window |
 | `remind` | Save a one-off reminder in `reminders.md` (at a date-time, or `+15m` / `+2h` / `+3d` from now); it is pushed to the phone when due |
 | `notify` | Push a message to the phone right now (only when ntfy is configured) |
+| `chores` | The chores from [Home-Board](https://github.com/bjornerikmoen2/home-board) per person: done and still to do, plus shared ones (only when Home-Board is configured) |
+
+With Home-Board configured, `agenda` (up to 7 days) and the evening briefing also list the chores.
 
 Dates in `events`, `recurring`, `due`, `reminders` and `birthday` are validated when a note is
 saved; see the vault's `_conventions.md` for the fields, including `cancels` (skip a routine item
@@ -127,6 +130,8 @@ For the real deployment (NAS vault over NFS, GitHub login, Cloudflare Tunnel) us
 | `NTFY_TOPIC` | `home-brain` | ntfy topic for all messages |
 | `NTFY_TOKEN` | | Access token of the ntfy user home-brain publishes as |
 | `BRIEFING_TIME` | `19:00` | When the evening briefing about tomorrow is sent |
+| `HOMEBOARD_URL` | | Home-Board's API, e.g. `http://home-board-api:8080`; chores are off when empty |
+| `HOMEBOARD_API_KEY` | | Home-Board's `Integrations__ApiKey` |
 
 Commands: `home-brain serve [--transport http|stdio] [--host H] [--port P]`, `home-brain init`
 (copy missing starter files into the vault, never overwrites), `home-brain reindex`.
@@ -149,6 +154,7 @@ src/home_brain/
   notify.py        ntfy client
   briefing.py      texts of the pushed reminders, briefings and Monday check
   scheduler.py     background loop: what is due, sending, record of what was sent
+  homeboard.py     chores from Home-Board's API-key endpoint, as a report and as agenda items
   server.py        FastMCP server and tools
   vault_template/  starter vault
 ```

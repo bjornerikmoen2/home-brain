@@ -5,10 +5,41 @@ from pathlib import Path
 
 import pytest
 
+import datetime as dt
+
 from home_brain.config import Settings
+from home_brain.homeboard import Chore, HomeBoardError
 from home_brain.index import Index
 from home_brain.notify import Message, NotifyError
 from home_brain.vault import Vault
+
+MON = dt.date(2026, 10, 19)
+TUE = dt.date(2026, 10, 20)
+CHORES = [
+    Chore(MON, "Make bed", "verified", "daily", 5, due="08:00", assigned_to="Ola", completed_by="Ola",
+          completed_at=dt.datetime(2026, 10, 19, 7, 40)),
+    Chore(MON, "Feed the cat", "todo", "daily", 10, due="09:00", assigned_to="Nora"),
+    Chore(MON, "Vacuum room", "todo", "during_week", 20, assigned_to="Ola"),
+    Chore(MON, "Empty dishwasher", "done", "daily", 10, group="kids", completed_by="Nora",
+          completed_at=dt.datetime(2026, 10, 19, 11, 5)),
+    Chore(TUE, "Make bed", "todo", "daily", 5, due="08:00", assigned_to="Ola"),
+    Chore(TUE, "Vacuum room", "todo", "during_week", 20, assigned_to="Ola"),
+    Chore(TUE, "Empty dishwasher", "todo", "daily", 10, group="kids"),
+]
+"""Chores as home-board would report them for Monday 19 and Tuesday 20 October 2026."""
+
+
+class FakeHomeBoard:
+    def __init__(self, chores: list[Chore] = CHORES, error: str | None = None) -> None:
+        self._chores = chores
+        self.error = error
+        self.calls: list[tuple[dt.date, dt.date]] = []
+
+    def chores(self, start: dt.date, end: dt.date) -> list[Chore]:
+        self.calls.append((start, end))
+        if self.error:
+            raise HomeBoardError(self.error)
+        return [c for c in self._chores if start <= c.date <= end]
 
 
 class FakeNotifier:

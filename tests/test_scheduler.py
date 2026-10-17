@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from conftest import FakeNotifier
+from conftest import FakeHomeBoard, FakeNotifier
 
 from home_brain.index import Index
 from home_brain.scheduler import Scheduler
@@ -96,6 +96,18 @@ def test_evening_briefing(scheduler_for: Callable[..., Scheduler], notifier: Fak
     [message] = notifier.sent
     assert message.title == "Tomorrow: Wednesday 21 October"
     assert message.text == "Reminder: Forest trip: rain gear\n09:00 Dentist (you)"
+
+
+def test_evening_briefing_with_chores(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
+    scheduler = scheduler_for(notifier, homeboard=FakeHomeBoard())
+    assert scheduler.tick(at(19, 19, 0)) == ["tomorrow:2026-10-19"]
+    assert notifier.sent[0].text.endswith("Chores:\nOla: Make bed (by 08:00)\nKids (shared): Empty dishwasher")
+
+
+def test_evening_briefing_when_home_board_is_down(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
+    scheduler = scheduler_for(notifier, homeboard=FakeHomeBoard(error="unreachable"))
+    assert scheduler.tick(at(19, 19, 0)) == ["tomorrow:2026-10-19"]
+    assert "Chores" not in notifier.sent[0].text
 
 
 def test_briefing_time_and_weekly_jobs(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:

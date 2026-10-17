@@ -38,7 +38,7 @@ _LIST_KEYS = {
     "due": ("date", "title"),
     "reminders": ("at", "text"),
 }
-_KIND_ORDER = {"break": 0, "birthday": 1, "due": 2, "event": 3, "recurring": 4, "reminder": 5}
+_KIND_ORDER = {"break": 0, "birthday": 1, "due": 2, "event": 3, "recurring": 4, "reminder": 5, "chore": 6}
 
 
 @dataclass(frozen=True)
@@ -215,9 +215,17 @@ def _check_item(key: str, at: str, item: dict[str, Any]) -> list[str]:
 # --- building the agenda -------------------------------------------------------
 
 
-def build(notes: Iterable[Note], start: dt.date, end: dt.date, today: dt.date, who: str | None = None) -> dict[str, Any]:
-    """Everything dated between start and end (inclusive), grouped by day."""
-    items: list[Item] = []
+def build(
+    notes: Iterable[Note],
+    start: dt.date,
+    end: dt.date,
+    today: dt.date,
+    who: str | None = None,
+    extra: Iterable[Item] = (),
+) -> dict[str, Any]:
+    """Everything dated between start and end (inclusive), grouped by day. `extra` adds items
+    from outside the vault, such as chores from home-board."""
+    items: list[Item] = [i for i in extra if start <= i.date <= end]
     upcoming: list[Item] = []
     problems: list[str] = []
     breaks: list[tuple[str, dt.date, dt.date]] = []  # (folder, first, last)
@@ -401,7 +409,7 @@ def _render(items: list[Item], upcoming: list[Item], problems: list[str], start:
         if packing:
             entry["bring"] = packing
         days.append(entry)
-    sources = sorted({i.source for i in items} | {i.source for i in upcoming})
+    sources = sorted({i.source for i in [*items, *upcoming] if i.source.endswith(".md")})
     result: dict[str, Any] = {
         "today": today.isoformat(),
         "start": start.isoformat(),

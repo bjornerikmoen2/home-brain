@@ -18,11 +18,12 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from . import __version__, frontmatter
-from .agenda import Note, as_date, as_moment
+from .agenda import Item, Note, as_date, as_moment
 from .agenda import build as build_agenda
 from .auth import build_auth
 from .config import Settings
 from .gitsync import GitError, VaultGit
+from .homeboard import HomeBoard, HomeBoardError, agenda_items, chore_report
 from .index import Index
 from .notify import Message, Notifier, NotifyError, Ntfy, Priority
 from .scheduler import Scheduler
@@ -42,6 +43,8 @@ The vault's filing conventions follow; read them again with read_note('_conventi
 """
 
 REMINDERS = "reminders.md"
+CHORE_DAYS = 7
+"""`agenda` lists home-board chores for ranges up to this many days."""
 _FROM_NOW = re.compile(r"^\+\s*([1-9]\d*)\s*([mhd])$")
 _UNITS = {"m": "minutes", "h": "hours", "d": "days"}
 REMINDERS_BODY = "\n# Reminders\n\nOne-off reminders saved with the remind tool. Mark old ones `done: true` or delete them.\n"
@@ -115,9 +118,15 @@ def open_vault(settings: Settings) -> Vault:
     return Vault(settings.vault_path, on_change=commit)
 
 
-def create_server(settings: Settings, notifier: Notifier | None = None, run_scheduler: bool = False) -> FastMCP:
+def create_server(
+    settings: Settings,
+    notifier: Notifier | None = None,
+    run_scheduler: bool = False,
+    homeboard: HomeBoard | None = None,
+) -> FastMCP:
     """The MCP server. With a notifier (from NTFY_URL unless given), it also has the `notify` tool,
-    and `run_scheduler` starts pushing reminders and briefings in the background."""
+    and `run_scheduler` starts pushing reminders and briefings in the background. With home-board
+    (from HOMEBOARD_URL unless given) it has the `chores` tool and chores in `agenda`."""
     vault = open_vault(settings)
     index = Index(vault, settings.data_path / "index.db")
     stats = index.refresh(force=True)
@@ -125,6 +134,18 @@ def create_server(settings: Settings, notifier: Notifier | None = None, run_sche
     notifier = notifier or Ntfy.from_settings(settings)
     if notifier is None:
         log.info("push notifications are off (NTFY_URL is not set)")
+    homeboard = homeboard or HomeBoard.from_settings(settings)
+    if homeboard is None:
+        log.info("chores are off (HOMEBOARD_URL is not set)")
+
+    def chore_items(first: dt.date, last: dt.date) -> tuple[list[Item], str | None]:
+        if homeboard is None:
+            return [], None
+        try:
+            return agenda_items(homeboard.chores(first, last), today()), None
+        except HomeBoardError as exc:
+            log.warning("agenda without chores: %s", exc)
+            return [], f"Chores are missing: {exc}"
 
     auth, middleware = build_auth(settings)
     mcp = FastMCP(
@@ -265,18 +286,29 @@ def create_server(settings: Settings, notifier: Notifier | None = None, run_sche
         Routine items are skipped on days covered by an event with `break: true` and an `end_date` in
         the same folder (school holidays), and on days with an event whose `cancels` text appears in
         their title (e.g. an event {date: ..., title: PE cancelled, cancels: PE}).
+
+        For up to 7 days (and no `folder`) it also lists the chores from Home-Board (kind `chore`,
+        with their `status`); the `chores` tool tells who has done what.
         """
         with _tool_errors():
             first = _parse_day(start)
             folder_rel = vault.folder_path(folder)[0]
+        last = first + dt.timedelta(days=days - 1)
         notes = [Note(path, title, meta) for path, title, meta in index.frontmatter(folder_rel)]
-        return build_agenda(notes, first, first + dt.timedelta(days=days - 1), today(), who)
+        extra, warning = chore_items(first, last) if days <= CHORE_DAYS and not folder_rel else ([], None)
+        result = build_agenda(notes, first, last, today(), who, extra)
+        if warning:
+            result["warnings"] = [warning]
+        return result
 
     @mcp.tool(annotations=EDIT)
     def remind(
         at: Annotated[
             str,
-            Field(description='When: "YYYY-MM-DDTHH:MM" (local time), just "YYYY-MM-DD", or from now: "+15m", "+2h", "+3d".'),
+            Field(
+                description='From now: "+15m", "+2h", "+3d" (always use this for "in 20 minutes" etc.). '
+                'Or a clock time: "YYYY-MM-DDTHH:MM" (local time), or just "YYYY-MM-DD".'
+            ),
         ],
         text: Annotated[str, Field(description="The reminder, written so it makes sense on its own.")],
         who: Annotated[str | None, Field(description="Person it concerns (note slug, e.g. 'ola').")] = None,
@@ -285,6 +317,10 @@ def create_server(settings: Settings, notifier: Notifier | None = None, run_sche
         """Save a one-off reminder ("remind me to buy a present on Thursday at 18:00"). It is stored
         under `reminders` in the note and shows up in `agenda` on its day. When push notifications
         are set up, it is also sent to the phone at that time (at 08:00 if it has no time).
+
+        For a time relative to now ("in 20 minutes", "in 2 hours") always pass at="+20m" / "+2h":
+        you may not know the exact current time, the server does. The result has the time it was
+        set for and the server's current time (`now`); tell the user the time from the result.
         """
         with _tool_errors():
             if match := _FROM_NOW.match(at.strip().lower()):
@@ -294,7 +330,7 @@ def create_server(settings: Settings, notifier: Notifier | None = None, run_sche
                 raise VaultError('at must be "YYYY-MM-DDTHH:MM", "YYYY-MM-DD" or like "+15m"')
             day, clock = moment
             if day < today() or (clock and dt.datetime.combine(day, dt.time.fromisoformat(clock)) < now()):
-                raise VaultError(f"{at} is in the past")
+                raise VaultError(f"{at} is in the past (it is now {now():%Y-%m-%dT%H:%M})")
             if not text.strip():
                 raise VaultError("text is empty")
             reminder: dict[str, Any] = {
@@ -312,7 +348,7 @@ def create_server(settings: Settings, notifier: Notifier | None = None, run_sche
                 meta = CommentedMap(type="reminders", reminders=frontmatter.from_json([reminder]))
                 vault.write(rel, frontmatter.render(meta, REMINDERS_BODY))
         index.refresh(force=True)
-        return {"path": rel, "reminder": reminder}
+        return {"path": rel, "reminder": reminder, "now": f"{now():%Y-%m-%dT%H:%M}"}
 
     if notifier is not None:
 
@@ -337,8 +373,35 @@ def create_server(settings: Settings, notifier: Notifier | None = None, run_sche
                 raise ToolError("the notification could not be sent; the ntfy server is not reachable or refused it") from exc
             return {"sent": True}
 
+    if homeboard is not None:
+
+        @mcp.tool(annotations=READ_ONLY)
+        def chores(
+            day: Annotated[str, Field(description="'today', 'yesterday', 'tomorrow' or a date like 2026-10-21.")] = "today",
+            who: Annotated[str | None, Field(description="Only this person: name or note slug, e.g. 'ola'.")] = None,
+            days: Annotated[int, Field(ge=1, le=31, description="How many days from `day`.")] = 1,
+        ) -> dict[str, Any]:
+            """The chores from Home-Board, the family's chore and points app: per person what is done
+            and what is still to do, plus the chores the kids share. Use it for "has Ola done her
+            chores today?", "which chores are left?" or "what did the kids do yesterday?".
+
+            `status` is todo, done (waiting for a parent to check it), verified or rejected. `late`
+            marks a chore past its due time that isn't done; `any_day` chores can be done on any day
+            this week or month.
+            """
+            with _tool_errors():
+                first = _parse_day(day)
+            try:
+                found = homeboard.chores(first, first + dt.timedelta(days=days - 1))
+            except HomeBoardError as exc:
+                log.warning("chores failed: %s", exc)
+                raise ToolError("Home-Board could not be reached, so the chores are unknown right now") from exc
+            return chore_report(found, now(), who)
+
     if run_scheduler and notifier is not None:
-        Scheduler(vault, index, notifier, settings.data_path / "scheduler.db", settings.briefing_time).start()
+        Scheduler(
+            vault, index, notifier, settings.data_path / "scheduler.db", settings.briefing_time, homeboard=homeboard
+        ).start()
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> PlainTextResponse:

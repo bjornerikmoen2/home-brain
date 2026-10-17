@@ -46,20 +46,22 @@ def tomorrow(agenda: dict[str, Any], day: dt.date) -> Message:
     if entry is None:
         # Sent anyway: a quiet evening shows that the briefing still works.
         return Message("Nothing on the agenda.", title=title, priority="low", tags=("calendar",))
-    lines = [line(item) for item in entry["items"]]
+    lines = [line(item) for item in entry["items"] if item["kind"] != "chore"]
     if entry.get("bring"):
         lines += ["", "Bring:"]
         lines += [f"{capitalize(names([who]))}: {', '.join(things)}" for who, things in entry["bring"].items()]
-    return Message("\n".join(lines), title=title, tags=("calendar",))
+    if chores := _chores_by_person([i for i in entry["items"] if i["kind"] == "chore"]):
+        lines += ["", "Chores:", *chores]
+    return Message("\n".join(lines).strip(), title=title, tags=("calendar",))
 
 
 def week_ahead(agenda: dict[str, Any], start: dt.date, end: dt.date) -> Message:
-    """What's special in the coming week. Weekly routines are left out: the evening briefings
-    cover them, and listing every PE lesson would bury the news."""
+    """What's special in the coming week. Weekly routines and chores are left out: the evening
+    briefings cover them, and listing every PE lesson would bury the news."""
     title = f"Week ahead: {start.day} {start:%b} – {end.day} {end:%b}"
     lines = []
     for entry in agenda["days"]:
-        items = [i for i in entry["items"] if i["kind"] != "recurring"]
+        items = [i for i in entry["items"] if i["kind"] not in ("recurring", "chore")]
         if items:
             lines.append(f"{short_day(as_date(entry['date']))}: " + "; ".join(line(i) for i in items))
     if not lines:
@@ -147,6 +149,16 @@ def _tires(note: Note, today: dt.date) -> list[str]:
             studs = f" Studs must be off after {short_day(studs_off)}." if studded and today <= studs_off else ""
             found.append(f"{car}: time to change to summer tires?{since}{studs}")
     return found
+
+
+def _chores_by_person(chores: list[dict[str, Any]]) -> list[str]:
+    """One line per person, e.g. `Ola: Make bed (by 08:00), Feed the cat`; shared chores last."""
+    lines: dict[str, list[str]] = {}
+    for chore in chores:
+        label = names(chore["who"]) if chore.get("who") else f"{capitalize(chore.get('shared_by', 'everyone'))} (shared)"
+        lines.setdefault(capitalize(label), []).append(chore["title"] + (f" (by {chore['time']})" if chore.get("time") else ""))
+    ordered = sorted(lines, key=lambda label: (label.endswith("(shared)"), label))
+    return [f"{label}: {', '.join(lines[label])}" for label in ordered]
 
 
 # --- formatting ------------------------------------------------------------------
