@@ -2,7 +2,8 @@
 
 Every path coming from a tool call is resolved and confined to the vault root.
 Hidden files and folders (.git, .trash, .obsidian) are off limits, only `.md`
-notes can be written, and nothing is ever hard-deleted.
+notes can be written, and nothing is ever hard-deleted. Attachments (PDFs) that the user
+copies in can be read, moved and deleted, but not written.
 """
 
 from __future__ import annotations
@@ -17,10 +18,11 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from importlib.resources import files
 from importlib.resources.abc import Traversable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import agenda, frontmatter
+from .documents import is_document
 from .frontmatter import FrontmatterError
 
 TRASH_DIR = ".trash"
@@ -36,7 +38,7 @@ class VaultError(Exception):
 @dataclass(frozen=True)
 class NoteFile:
     path: str
-    """Vault-relative path with forward slashes, e.g. `vehicles/family-car.md`."""
+    """Vault-relative path with forward slashes, e.g. `vehicles/family-car.md` or `insurance/policy.pdf`."""
     mtime_ns: int
     size: int
 
@@ -66,6 +68,25 @@ class Vault:
             parts[-1] += ".md"
         return self._resolve(parts)
 
+    def attachment_path(self, path: str) -> tuple[str, Path]:
+        """Resolve the path of an attachment (a PDF) from a tool call."""
+        parts = self._clean(path)
+        if not parts or not is_document(parts[-1]):
+            raise VaultError("an attachment path ends in .pdf, like 'insurance/home-policy-2026.pdf'")
+        return self._resolve(parts)
+
+    def entry_path(self, path: str, like: str | None = None) -> tuple[str, Path]:
+        """Resolve a note or attachment path. A destination for moving the attachment `like` gets
+        its file type when it has none."""
+        parts = self._clean(path)
+        if not parts:
+            raise VaultError("path is empty")
+        if like and is_document(like) and not is_document(parts[-1]) and not parts[-1].lower().endswith(".md"):
+            parts[-1] += PurePosixPath(like).suffix.lower()
+        if is_document(parts[-1]):
+            return self._resolve(parts)
+        return self.note_path("/".join(parts))
+
     def folder_path(self, folder: str | None) -> tuple[str, Path]:
         """Resolve a folder path; empty means the vault root."""
         return self._resolve(self._clean(folder or ""))
@@ -94,10 +115,17 @@ class Vault:
 
     def iter_notes(self) -> Iterator[NoteFile]:
         """All visible `.md` files in the vault, in path order."""
+        return self._iter_files(lambda name: name.lower().endswith(".md"))
+
+    def iter_attachments(self) -> Iterator[NoteFile]:
+        """All visible attachments (PDFs) in the vault, in path order."""
+        return self._iter_files(is_document)
+
+    def _iter_files(self, wanted: Callable[[str], bool]) -> Iterator[NoteFile]:
         for dirpath, dirnames, filenames in os.walk(self.root):
             dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
             for name in sorted(filenames):
-                if name.startswith(".") or not name.lower().endswith(".md"):
+                if name.startswith(".") or not wanted(name):
                     continue
                 full = Path(dirpath, name)
                 try:
@@ -174,12 +202,14 @@ class Vault:
         return rel, frontmatter.to_plain(meta)
 
     def move(self, path: str, new_path: str) -> tuple[str, str]:
-        """Rename or refile a note. Never overwrites."""
+        """Rename or refile a note or attachment. Never overwrites."""
         with self._lock:
-            src_rel, src = self.note_path(path)
-            dst_rel, dst = self.note_path(new_path)
+            src_rel, src = self.entry_path(path)
+            dst_rel, dst = self.entry_path(new_path, like=src_rel)
             if not src.is_file():
-                raise VaultError(f"note not found: {src_rel}")
+                raise VaultError(f"{_kind(src_rel)} not found: {src_rel}")
+            if is_document(src_rel) != is_document(dst_rel):
+                raise VaultError(f"{src_rel} can only be moved to a path of the same file type")
             if dst.exists():
                 raise VaultError(f"{dst_rel} already exists")
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -188,11 +218,11 @@ class Vault:
         return src_rel, dst_rel
 
     def delete(self, path: str) -> tuple[str, str]:
-        """Soft delete: move the note to `.trash/<timestamp>/<path>`."""
+        """Soft delete: move the note or attachment to `.trash/<timestamp>/<path>`."""
         with self._lock:
-            rel, full = self.note_path(path)
+            rel, full = self.entry_path(path)
             if not full.is_file():
-                raise VaultError(f"note not found: {rel}")
+                raise VaultError(f"{_kind(rel)} not found: {rel}")
             stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
             trashed = self.root / TRASH_DIR / stamp / rel
             trashed.parent.mkdir(parents=True, exist_ok=True)
@@ -219,6 +249,10 @@ class Vault:
 
     def is_empty(self) -> bool:
         return not self.root.exists() or not any(self.root.iterdir())
+
+
+def _kind(path: str) -> str:
+    return "attachment" if is_document(path) else "note"
 
 
 def _problems(text: str) -> list[str]:

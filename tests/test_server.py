@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import AsyncIterator
 
 import pytest
-from conftest import FEED_CAT_ID, OLA_ID, FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
+from conftest import FEED_CAT_ID, OLA_ID, POLICY_PDF, FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
@@ -14,8 +14,8 @@ from home_brain.server import build_instructions, create_server
 from home_brain.vault import Vault
 
 TOOLS = {
-    "search_notes", "read_note", "list_notes", "write_note", "patch_note", "move_note", "delete_note",
-    "agenda", "remind",
+    "search_notes", "read_note", "read_attachment", "list_notes", "write_note", "patch_note", "move_note",
+    "delete_note", "agenda", "remind",
 }
 
 
@@ -85,6 +85,51 @@ async def test_move_and_delete_tools(client: Client) -> None:
     deleted = await call(client, "delete_note", path="vehicles/tire-quote.md")
     assert deleted["trashed_to"].endswith("/vehicles/tire-quote.md")
     assert (await call(client, "search_notes", query="dekktilbud"))["results"] == []
+
+
+async def test_filing_and_reading_a_pdf(settings: Settings) -> None:
+    (settings.vault_path / "inbox" / "Forsikring 2026.pdf").write_bytes(POLICY_PDF)
+    async with Client(create_server(settings)) as client:
+        await file_read_and_delete_a_pdf(client)
+
+
+async def file_read_and_delete_a_pdf(client: Client) -> None:
+    listed = await call(client, "list_notes", folder="inbox")
+    assert [a["path"] for a in listed["attachments"]] == ["inbox/Forsikring 2026.pdf"]
+
+    moved = await call(client, "move_note", path="inbox/Forsikring 2026.pdf", new_path="house/home-insurance-2026")
+    assert moved == {"from": "inbox/Forsikring 2026.pdf", "to": "house/home-insurance-2026.pdf"}
+    linked = await call(client, "patch_note", path="house/house.md", set_frontmatter={"attachments": ["house/home-insurance-2026.pdf"]})
+    assert "warnings" not in linked
+
+    found = await call(client, "search_notes", query="snow roof")
+    [hit] = found["attachments"]
+    assert (hit["path"], hit["page"]) == ("house/home-insurance-2026.pdf", 3)
+    page = await call(client, "read_attachment", path=hit["path"], first_page=3)
+    assert page["text"].startswith("[Page 3]\nExclusions\nSnow damage")
+    assert page["linked_from"] == ["house/house.md"]
+    assert "attachments" not in await call(client, "search_notes", query="snow", note_type="house")
+
+    # Moving the PDF keeps the link; deleting it removes the link.
+    moved = await call(client, "move_note", path="house/home-insurance-2026.pdf", new_path="insurance/home-2026.pdf")
+    assert moved["links_updated"] == ["house/house.md"]
+    house = await call(client, "read_note", path="house/house.md")
+    assert "attachments: [insurance/home-2026.pdf]" in house["content"]
+    deleted = await call(client, "delete_note", path="insurance/home-2026.pdf")
+    assert deleted["links_removed"] == ["house/house.md"]
+    assert "attachments" not in (await call(client, "read_note", path="house/house.md"))["content"]
+    assert "attachments" not in await call(client, "search_notes", query="snow roof")
+
+
+async def test_dead_attachment_links_are_reported(client: Client) -> None:
+    content = "---\ntype: insurance\nattachments: [insurance/missing.pdf, insurance/notes.txt]\n---\n# Car insurance\n"
+    saved = await call(client, "write_note", path="insurance/car.md", content=content)
+    assert saved["warnings"] == [
+        "attachments: insurance/missing.pdf is not in the vault (list_notes shows the attachments)",
+        "attachments: insurance/notes.txt: an attachment path ends in .pdf, like 'insurance/home-policy-2026.pdf'",
+    ]
+    patched = await call(client, "patch_note", path="insurance/car.md", set_frontmatter={"attachments": {"x": 1}})
+    assert patched["warnings"] == ["attachments: list the vault paths of PDFs, like [insurance/home-policy-2026.pdf]"]
 
 
 @pytest.fixture
@@ -266,6 +311,8 @@ async def test_empty_search_gives_a_hint(client: Client) -> None:
         ("write_note", {"path": "people/kari.md", "content": "x"}, "already exists"),
         ("patch_note", {"path": "people/kari.md"}, "nothing to change"),
         ("list_notes", {"folder": ".git"}, "hidden"),
+        ("read_attachment", {"path": "house/house.md"}, "ends in .pdf"),
+        ("read_attachment", {"path": "house/policy.pdf"}, "attachment not found"),
     ],
 )
 async def test_errors_reach_the_model(client: Client, tool: str, arguments: dict, message: str) -> None:

@@ -118,13 +118,14 @@ Keep the surface small and generic; domain logic lives in conventions + `agenda`
 
 | Tool | Purpose |
 |---|---|
-| `search_notes(query, folder?, note_type?, limit?)` | FTS5 search over body + frontmatter; returns paths + snippets |
+| `search_notes(query, folder?, note_type?, limit?)` | FTS5 search over body + frontmatter; returns paths + snippets, and matching pages of PDF attachments |
 | `read_note(path)` | Full note (frontmatter + body) |
-| `list_notes(folder?, recursive?, note_type?)` | Browse the vault |
-| `write_note(path, content, overwrite?)` | Create/replace a note (validated frontmatter) |
+| `read_attachment(path, first_page?, last_page?)` | Text of a PDF in the vault, page by page (about 30 000 characters per call) |
+| `list_notes(folder?, recursive?, note_type?)` | Browse the vault: notes and PDF attachments |
+| `write_note(path, content, overwrite?)` | Create/replace a note (validated frontmatter; warns about `attachments` that don't exist) |
 | `patch_note(path, set_frontmatter?, append_to_list?, append_text?, under_heading?)` | Merge frontmatter / append to lists / append under a heading |
-| `move_note(path, new_path)` | Refile (e.g. out of `inbox/`) |
-| `delete_note(path)` | Soft delete: move to `.trash/` |
+| `move_note(path, new_path)` | Refile a note or PDF (e.g. out of `inbox/`); notes listing a moved PDF are updated |
+| `delete_note(path)` | Soft delete of a note or PDF: move to `.trash/` |
 | `agenda(from, to, who?)` | Everything dated in range: events, recurring, birthdays, due, reminders, and home-board chores (up to 7 days) |
 | `chores(day?, who?, days?)` | home-board chores per person: done, still to do, shared |
 | `scoreboard(who?)` | home-board points per child, next payout, chores waiting for approval |
@@ -303,6 +304,9 @@ evening briefing arrives daily.
       the week ahead; a feed that can't be read is mentioned instead of silently missing
 - [x] Approving chores from Claude: `approve_chores`, `reject_chore` and `award_points`, through
       home-board's write endpoints and a separate write key (`HOMEBOARD_WRITE_KEY`)
+- [x] PDF attachments: the user copies PDFs in over SMB (Claude can't hand over the file it was
+      shown); their text is indexed per page (pypdf), `read_attachment` reads it, notes link to
+      them with `attachments`. No OCR for scans yet.
 - [ ] Two-way chat channel (Slack/Telegram/WhatsApp) using Claude API + the same tools
 - [ ] Access for other household members, with private folders
 - [ ] Semantic search (sqlite-vec) — only if keyword search proves insufficient

@@ -5,6 +5,9 @@ Changes are detected by comparing (mtime, size) with a directory scan, because
 inotify doesn't work on NFS mounts and notes may be edited outside home-brain
 (e.g. in Obsidian). A scan runs at most every few seconds before queries, and
 immediately after home-brain's own writes.
+
+Attachments (PDFs) are indexed one row per page, so a search hit can name the page.
+Their text is extracted once per change and kept here for `read_attachment`.
 """
 
 from __future__ import annotations
@@ -19,13 +22,13 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import frontmatter
+from . import documents, frontmatter
 from .frontmatter import FrontmatterError
 from .vault import Vault, VaultError
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _TOKEN = re.compile(r"\w+", re.UNICODE)
 _H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$", re.MULTILINE)
 
@@ -46,10 +49,39 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
     path, title, tags, meta, body,
     tokenize = 'unicode61 remove_diacritics 2'
 );
+CREATE TABLE files (
+    id       INTEGER PRIMARY KEY,
+    path     TEXT NOT NULL UNIQUE,
+    folder   TEXT NOT NULL,
+    pages    INTEGER NOT NULL,
+    chars    INTEGER NOT NULL,
+    error    TEXT,
+    mtime_ns INTEGER NOT NULL,
+    size     INTEGER NOT NULL
+);
+CREATE TABLE file_pages (
+    id      INTEGER PRIMARY KEY,
+    file_id INTEGER NOT NULL,
+    page    INTEGER NOT NULL,
+    text    TEXT NOT NULL
+);
+CREATE INDEX file_pages_file ON file_pages(file_id, page);
+CREATE VIRTUAL TABLE pages_fts USING fts5(
+    path, title, body,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
 """
 
 # bm25 column weights: path, title, tags, meta, body
 _WEIGHTS = (2.0, 5.0, 3.0, 2.0, 1.0)
+# and for attachment pages: path, title, body
+_PAGE_WEIGHTS = (1.0, 2.0, 1.0)
+READ_CHARS = 30_000
+"""How much attachment text `read_attachment` returns per call (about 8 000 tokens)."""
+_DROP_ALL = (
+    "DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes;"
+    " DROP TABLE IF EXISTS pages_fts; DROP TABLE IF EXISTS file_pages; DROP TABLE IF EXISTS files;"
+)
 
 
 class Index:
@@ -82,15 +114,13 @@ class Index:
             version = self._conn.execute("PRAGMA user_version").fetchone()[0]
             if version == SCHEMA_VERSION:
                 return
-            self._conn.executescript(
-                "DROP TABLE IF EXISTS notes_fts; DROP TABLE IF EXISTS notes;"
-                + _SCHEMA
-                + f"PRAGMA user_version = {SCHEMA_VERSION};"
-            )
+            self._conn.executescript(_DROP_ALL + _SCHEMA + f"PRAGMA user_version = {SCHEMA_VERSION};")
 
     def rebuild(self) -> dict[str, int]:
         with self._lock:
-            self._conn.executescript("DELETE FROM notes_fts; DELETE FROM notes;")
+            self._conn.executescript(
+                "DELETE FROM notes_fts; DELETE FROM notes; DELETE FROM pages_fts; DELETE FROM file_pages; DELETE FROM files;"
+            )
             return self.refresh(force=True)
 
     # --- sync with disk ------------------------------------------------------
@@ -117,6 +147,7 @@ class Index:
                         continue
                     if self._upsert(path, existing[0] if existing else None):
                         stats["updated" if existing else "added"] += 1
+                self._refresh_files(stats)
             self._last_refresh = time.monotonic()
             if any(stats.values()):
                 log.info("index refreshed: %s", stats)
@@ -167,6 +198,52 @@ class Index:
         )
         return True
 
+    def _refresh_files(self, stats: dict[str, int]) -> None:
+        on_disk = {f.path: f for f in self._vault.iter_attachments()}
+        known = {
+            row["path"]: (row["id"], row["mtime_ns"], row["size"])
+            for row in self._conn.execute("SELECT id, path, mtime_ns, size FROM files")
+        }
+        for path in known.keys() - on_disk.keys():
+            self._delete_file(known[path][0])
+            stats["removed"] += 1
+        for path, found in on_disk.items():
+            existing = known.get(path)
+            if existing and existing[1:] == (found.mtime_ns, found.size):
+                continue
+            if existing:
+                self._delete_file(existing[0])
+            # A file still being copied in gets indexed as it is now; its next change re-reads it.
+            try:
+                extracted = documents.extract(self._vault.attachment_path(path)[1])
+            except (VaultError, OSError) as exc:
+                log.warning("cannot open %s: %s", path, exc)
+                extracted = documents.Extracted(0, error="the file could not be opened")
+            folder = path.rsplit("/", 1)[0] if "/" in path else ""
+            title = PurePosixPath(path).stem
+            cur = self._conn.execute(
+                "INSERT INTO files (path, folder, pages, chars, error, mtime_ns, size)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (path, folder, extracted.page_count, sum(map(len, extracted.pages)), extracted.error,
+                 found.mtime_ns, found.size),
+            )
+            for number, text in enumerate(extracted.pages, start=1):
+                page = self._conn.execute(
+                    "INSERT INTO file_pages (file_id, page, text) VALUES (?, ?, ?)", (cur.lastrowid, number, text)
+                )
+                self._conn.execute(
+                    "INSERT INTO pages_fts (rowid, path, title, body) VALUES (?, ?, ?, ?)",
+                    (page.lastrowid, path, title, text),
+                )
+            if extracted.error:
+                log.warning("%s: %s", path, extracted.error)
+            stats["updated" if existing else "added"] += 1
+
+    def _delete_file(self, file_id: int) -> None:
+        self._conn.execute("DELETE FROM pages_fts WHERE rowid IN (SELECT id FROM file_pages WHERE file_id = ?)", (file_id,))
+        self._conn.execute("DELETE FROM file_pages WHERE file_id = ?", (file_id,))
+        self._conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+
     # --- queries -------------------------------------------------------------
 
     def search(
@@ -205,25 +282,132 @@ class Index:
             for r in rows
         ]
 
+    def search_attachments(self, query: str, folder: str = "", limit: int = 10) -> list[dict[str, Any]]:
+        """Attachments with pages matching the query, best first: the best page of each, plus the
+        other matching pages."""
+        fts_query = build_fts_query(query)
+        if not fts_query:
+            return []
+        self.refresh()
+        weights = ", ".join(str(w) for w in _PAGE_WEIGHTS)
+        sql = (
+            "SELECT f.path, f.mtime_ns, p.page,"
+            " snippet(pages_fts, 2, '**', '**', ' … ', 20) AS snippet,"
+            f" bm25(pages_fts, {weights}) AS score"
+            " FROM pages_fts JOIN file_pages p ON p.id = pages_fts.rowid JOIN files f ON f.id = p.file_id"
+            " WHERE pages_fts MATCH ?"
+        )
+        sql, params = _filters(sql, [fts_query], folder, None, alias="f")
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY score LIMIT 500", params).fetchall()
+        hits: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            hit = hits.get(r["path"])
+            if hit is None and len(hits) < max(1, min(limit, 50)):
+                hits[r["path"]] = {
+                    "path": r["path"], "page": r["page"], "snippet": r["snippet"], "also_on_pages": [],
+                    "modified": _iso(r["mtime_ns"]),
+                }
+            elif hit is not None and len(hit["also_on_pages"]) < 10:
+                hit["also_on_pages"].append(r["page"])
+        for hit in hits.values():
+            if hit["also_on_pages"]:
+                hit["also_on_pages"].sort()
+            else:
+                del hit["also_on_pages"]
+        return list(hits.values())
+
     def list_notes(
         self, folder: str = "", note_type: str | None = None, recursive: bool = True, limit: int = 200
     ) -> dict[str, Any]:
-        """Notes under a folder (path order) plus its immediate subfolders."""
+        """Notes and attachments under a folder (path order) plus its immediate subfolders."""
         self.refresh()
         sql = "SELECT path, title, type, mtime_ns FROM notes n WHERE 1 = 1"
         sql, params = _filters(sql, [], folder, note_type)
-        sql += " ORDER BY path"
+        files_sql, files_params = _filters("SELECT path, pages, error, mtime_ns FROM files f WHERE 1 = 1", [], folder, None, alias="f")
         with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
+            rows = self._conn.execute(sql + " ORDER BY path", params).fetchall()
+            files = [] if note_type else self._conn.execute(files_sql + " ORDER BY path", files_params).fetchall()
         prefix = f"{folder}/" if folder else ""
-        subfolders = sorted({r["path"][len(prefix) :].split("/")[0] for r in rows if "/" in r["path"][len(prefix) :]})
+        subfolders = sorted(
+            {r["path"][len(prefix) :].split("/")[0] for r in [*rows, *files] if "/" in r["path"][len(prefix) :]}
+        )
         if not recursive:
             rows = [r for r in rows if "/" not in r["path"][len(prefix) :]]
+            files = [r for r in files if "/" not in r["path"][len(prefix) :]]
         notes = [
             {"path": r["path"], "title": r["title"], "type": r["type"], "modified": _iso(r["mtime_ns"])}
             for r in rows[:limit]
         ]
-        return {"folder": folder, "subfolders": subfolders, "notes": notes, "truncated": len(rows) > limit}
+        result: dict[str, Any] = {"folder": folder, "subfolders": subfolders, "notes": notes}
+        if files:
+            result["attachments"] = [
+                {"path": r["path"], "pages": r["pages"], "modified": _iso(r["mtime_ns"])}
+                | ({"problem": r["error"]} if r["error"] else {})
+                for r in files[:limit]
+            ]
+        result["truncated"] = len(rows) > limit or len(files) > limit
+        return result
+
+    def read_attachment(self, path: str, first_page: int = 1, last_page: int | None = None) -> dict[str, Any]:
+        """The text of an attachment's pages, up to READ_CHARS; `next_page` says where to go on."""
+        self.refresh()
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM files WHERE path = ?", (path,)).fetchone()
+            if row is None:  # maybe copied in moments ago
+                self.refresh(force=True)
+                row = self._conn.execute("SELECT * FROM files WHERE path = ?", (path,)).fetchone()
+            if row is None:
+                raise VaultError(f"attachment not found: {path} (use search_notes or list_notes to find it)")
+            if not row["chars"]:
+                raise VaultError(
+                    f"{path} can't be read: {row['error'] or 'it has no text'}. "
+                    "Ask the user to attach the PDF in the chat instead."
+                )
+            if first_page > row["pages"]:
+                raise VaultError(f"{path} has only {row['pages']} pages")
+            last = min(last_page or row["pages"], row["pages"])
+            if last < first_page:
+                raise VaultError("last_page is before first_page")
+            pages = self._conn.execute(
+                "SELECT page, text FROM file_pages WHERE file_id = ? AND page BETWEEN ? AND ? ORDER BY page",
+                (row["id"], first_page, last),
+            ).fetchall()
+        parts: list[str] = []
+        used, next_page = 0, None
+        for page in pages:
+            chunk = f"[Page {page['page']}]\n{page['text']}"
+            if parts and used + len(chunk) > READ_CHARS:
+                next_page = page["page"]
+                break
+            if len(chunk) > READ_CHARS:
+                chunk = chunk[:READ_CHARS] + " …"
+            parts.append(chunk)
+            used += len(chunk)
+        result: dict[str, Any] = {
+            "path": path,
+            "pages": row["pages"],
+            "first_page": first_page,
+            "last_page": next_page - 1 if next_page else last,
+            "text": "\n\n".join(parts),
+            "modified": _iso(row["mtime_ns"]),
+        }
+        if next_page:
+            result["next_page"] = next_page
+        if row["error"]:
+            result["problem"] = row["error"]
+        return result
+
+    def linked_from(self, path: str) -> dict[str, Any]:
+        """Notes whose `attachments` frontmatter lists this attachment, with that list."""
+        self.refresh()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT n.path, n.frontmatter FROM notes n, json_each(n.frontmatter, '$.attachments') j"
+                " WHERE j.value = ? GROUP BY n.path ORDER BY n.path",
+                (path,),
+            ).fetchall()
+        return {r["path"]: json.loads(r["frontmatter"])["attachments"] for r in rows}
 
     def frontmatter(self, folder: str = "") -> list[tuple[str, str, dict[str, Any]]]:
         """(path, title, frontmatter) of every note under a folder, for the agenda."""
@@ -249,12 +433,14 @@ def build_fts_query(text: str) -> str | None:
     return " OR ".join(f'"{t}"*' for t in dict.fromkeys(tokens))
 
 
-def _filters(sql: str, params: list[Any], folder: str, note_type: str | None) -> tuple[str, list[Any]]:
+def _filters(
+    sql: str, params: list[Any], folder: str, note_type: str | None, alias: str = "n"
+) -> tuple[str, list[Any]]:
     if folder:
-        sql += " AND (n.folder = ? OR substr(n.folder, 1, ?) = ?)"
+        sql += f" AND ({alias}.folder = ? OR substr({alias}.folder, 1, ?) = ?)"
         params += [folder, len(folder) + 1, f"{folder}/"]
     if note_type:
-        sql += " AND n.type = ?"
+        sql += f" AND {alias}.type = ?"
         params.append(note_type)
     return sql, params
 

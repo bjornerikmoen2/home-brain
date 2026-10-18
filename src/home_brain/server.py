@@ -23,6 +23,7 @@ from .agenda import build as build_agenda
 from .auth import build_auth
 from .calendars import Calendars
 from .config import Settings
+from .documents import is_document
 from .gitsync import GitError, VaultGit
 from .homeboard import (
     HomeBoard,
@@ -48,6 +49,8 @@ cars, house and events. Search it before answering questions about the family, a
 the user shares. Prefer updating an existing note (patch_note) over creating a duplicate.
 For anything about dates ("what's on tomorrow?", "what do the kids need for school?", "upcoming
 birthdays or deadlines?") call `agenda` first; save reminders with `remind`.
+PDFs the user copied into the vault (insurance policies, contracts, manuals) are attachments:
+search_notes also searches their text, and read_attachment reads them.
 The vault's filing conventions follow; read them again with read_note('_conventions.md') if needed.
 """
 
@@ -161,6 +164,38 @@ def create_server(
             log.warning("agenda without chores: %s", exc)
             return [], f"Chores are missing: {exc}"
 
+    def attachment_warnings(meta: dict[str, Any]) -> list[str]:
+        """Problems with the `attachments` a note lists, so a typo doesn't leave a dead link."""
+        links = meta.get("attachments")
+        if links is None:
+            return []
+        if isinstance(links, str):
+            links = [links]
+        if not isinstance(links, list) or not all(isinstance(link, str) for link in links):
+            return ["attachments: list the vault paths of PDFs, like [insurance/home-policy-2026.pdf]"]
+        warnings = []
+        for link in links:
+            try:
+                full = vault.attachment_path(link)[1]
+            except VaultError as exc:
+                warnings.append(f"attachments: {link}: {exc}")
+                continue
+            if not full.is_file():
+                warnings.append(f"attachments: {link} is not in the vault (list_notes shows the attachments)")
+        return warnings
+
+    def relink(old: str, new: str | None) -> list[str]:
+        """Point the notes that list attachment `old` at `new`, or drop it; returns the notes changed."""
+        changed = []
+        for note, links in index.linked_from(old).items():
+            if isinstance(links, list):
+                value = [new if link == old else link for link in links if new or link != old] or None
+            else:
+                value = new
+            vault.patch(note, set_frontmatter={"attachments": value})
+            changed.append(note)
+        return changed
+
     auth, middleware = build_auth(settings)
     mcp = FastMCP(
         name="home-brain",
@@ -182,12 +217,19 @@ def create_server(
 
         Every keyword is prefix-matched and any keyword may match, so a few distinctive words work best.
         Returns paths and snippets; use read_note to get a whole note.
+
+        It also searches the text of attachments (PDFs in the vault, e.g. insurance policies):
+        matches are under `attachments`, with the best `page` and other matching pages; read them
+        with read_attachment. Prefer the notes for key facts and the attachments for fine print.
         """
         with _tool_errors():
             folder_rel = vault.folder_path(folder)[0]
             results = index.search(query, folder_rel, note_type, limit)
+            attachments = [] if note_type else index.search_attachments(query, folder_rel, limit)
         response: dict[str, Any] = {"query": query, "results": results}
-        if not results:
+        if attachments:
+            response["attachments"] = attachments
+        if not results and not attachments:
             response["hint"] = "No matches. Try other or fewer keywords, or browse with list_notes."
         return response
 
@@ -202,12 +244,31 @@ def create_server(
         return {"path": rel, "content": text, "modified": modified}
 
     @mcp.tool(annotations=READ_ONLY)
+    def read_attachment(
+        path: Annotated[str, Field(description="Vault-relative path of the PDF, e.g. 'insurance/home-policy-2026.pdf'.")],
+        first_page: Annotated[int, Field(ge=1, description="First page to read.")] = 1,
+        last_page: Annotated[int | None, Field(ge=1, description="Last page to read; leave out to read on as far as fits.")] = None,
+    ) -> dict[str, Any]:
+        """Read the text of an attachment: a PDF the user copied into the vault, such as an
+        insurance policy, contract or manual. Notes list theirs under `attachments`, and
+        search_notes finds the pages that match. Long documents come in parts: continue at
+        `next_page`. Name the page when you answer from it. The text is taken from the PDF, so
+        tables may lose their layout. `linked_from` lists the notes that link to it.
+        """
+        with _tool_errors():
+            rel = vault.attachment_path(path)[0]
+            result = index.read_attachment(rel, first_page, last_page)
+        result["linked_from"] = list(index.linked_from(rel))
+        return result
+
+    @mcp.tool(annotations=READ_ONLY)
     def list_notes(
         folder: Annotated[str, Field(description="Folder to list; empty for the whole vault.")] = "",
         recursive: Annotated[bool, Field(description="Include notes in subfolders.")] = True,
         note_type: Annotated[str | None, Field(description="Only notes whose frontmatter `type` equals this.")] = None,
     ) -> dict[str, Any]:
-        """List notes (path, title, type, modified) under a folder, plus its subfolders."""
+        """List notes (path, title, type, modified) under a folder, plus its subfolders, and the
+        attachments (PDFs) there, e.g. new ones the user copied into inbox/."""
         with _tool_errors():
             folder_rel = vault.folder_path(folder)[0]
         return index.list_notes(folder_rel, note_type, recursive)
@@ -226,7 +287,10 @@ def create_server(
         with _tool_errors():
             rel, created = vault.write(path, content, overwrite)
         index.refresh(force=True)
-        return {"path": rel, "created": created}
+        result: dict[str, Any] = {"path": rel, "created": created}
+        if warnings := attachment_warnings(frontmatter.to_plain(frontmatter.parse(content.replace("\r\n", "\n"))[0])):
+            result["warnings"] = warnings
+        return result
 
     @mcp.tool(annotations=EDIT)
     def patch_note(
@@ -258,28 +322,41 @@ def create_server(
                 under_heading=under_heading,
             )
         index.refresh(force=True)
-        return {"path": rel, "frontmatter": meta}
+        result: dict[str, Any] = {"path": rel, "frontmatter": meta}
+        if warnings := attachment_warnings(meta):
+            result["warnings"] = warnings
+        return result
 
     @mcp.tool(annotations=EDIT)
     def move_note(
-        path: Annotated[str, Field(description="Current vault-relative path.")],
+        path: Annotated[str, Field(description="Current vault-relative path of a note or attachment (PDF).")],
         new_path: Annotated[str, Field(description="New vault-relative path; must not exist yet.")],
     ) -> dict[str, Any]:
-        """Rename a note or file it into another folder (e.g. out of inbox/)."""
+        """Rename a note or attachment, or file it into another folder (e.g. out of inbox/).
+        Notes that list a moved attachment under `attachments` are updated to the new path."""
         with _tool_errors():
             old, new = vault.move(path, new_path)
+            relinked = relink(old, new) if is_document(old) else []
         index.refresh(force=True)
-        return {"from": old, "to": new}
+        result: dict[str, Any] = {"from": old, "to": new}
+        if relinked:
+            result["links_updated"] = relinked
+        return result
 
     @mcp.tool(annotations=DELETE)
     def delete_note(
-        path: Annotated[str, Field(description="Vault-relative path of the note to delete.")],
+        path: Annotated[str, Field(description="Vault-relative path of the note or attachment (PDF) to delete.")],
     ) -> dict[str, Any]:
-        """Delete a note. It is moved to the vault's .trash folder, so it can be recovered by hand."""
+        """Delete a note or attachment. It is moved to the vault's .trash folder, so it can be
+        recovered by hand. A deleted attachment is also removed from the notes that list it."""
         with _tool_errors():
             rel, trashed = vault.delete(path)
+            unlinked = relink(rel, None) if is_document(rel) else []
         index.refresh(force=True)
-        return {"path": rel, "trashed_to": trashed}
+        result: dict[str, Any] = {"path": rel, "trashed_to": trashed}
+        if unlinked:
+            result["links_removed"] = unlinked
+        return result
 
     @mcp.tool(annotations=READ_ONLY)
     def agenda(

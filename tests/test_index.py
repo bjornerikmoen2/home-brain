@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import ANY
 
 import pytest
+from conftest import POLICY_PDF, make_pdf
 
 from home_brain.index import Index, build_fts_query
-from home_brain.vault import Vault
+from home_brain.vault import Vault, VaultError
 
 
 def paths(results: list[dict]) -> list[str]:
@@ -91,6 +93,86 @@ def test_list_notes(index: Index) -> None:
 
     people = index.list_notes(note_type="person")
     assert {n["title"] for n in people["notes"]} == {"Ola Nordmann (senior)", "Kari Nordmann", "Ola Nordmann"}
+
+
+def add_pdf(vault: Vault, path: str, data: bytes = POLICY_PDF) -> None:
+    full = vault.root / path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(data)
+
+
+def test_search_finds_pages_of_attachments(vault: Vault, index: Index) -> None:
+    add_pdf(vault, "house/home-insurance-2026.pdf")
+    add_pdf(vault, "inbox/scan.pdf", make_pdf(""))
+    [hit] = index.search_attachments("deductible")
+    assert hit["path"] == "house/home-insurance-2026.pdf"
+    assert hit["page"] in (2, 3) and hit["also_on_pages"] == [5 - hit["page"]]
+    assert "**deductible**" in hit["snippet"].lower()
+    assert [h["page"] for h in index.search_attachments("snow roof")] == [3]
+    assert index.search_attachments("deductible", folder="vehicles") == []
+    # Attachments are listed apart from the notes.
+    assert "house/home-insurance-2026.pdf" not in paths(index.search("deductible"))
+
+
+def test_attachments_in_list_notes(vault: Vault, index: Index) -> None:
+    add_pdf(vault, "insurance/policy.pdf")
+    add_pdf(vault, "inbox/scan.pdf", make_pdf(""))
+    root = index.list_notes(recursive=False)
+    assert "insurance" in root["subfolders"]  # a folder with only PDFs
+    assert "attachments" not in root
+    assert index.list_notes()["attachments"] == [
+        {"path": "inbox/scan.pdf", "pages": 1, "modified": ANY, "problem": "the PDF has no text, it is probably a scan"},
+        {"path": "insurance/policy.pdf", "pages": 3, "modified": ANY},
+    ]
+    assert "attachments" not in index.list_notes(note_type="vehicle")
+
+
+def test_read_attachment_in_parts(vault: Vault, index: Index, monkeypatch: pytest.MonkeyPatch) -> None:
+    add_pdf(vault, "house/policy.pdf")
+    whole = index.read_attachment("house/policy.pdf")
+    assert (whole["pages"], whole["first_page"], whole["last_page"]) == (3, 1, 3)
+    assert whole["text"].startswith("[Page 1]\nHome insurance policy 2026\n")
+    assert "\n\n[Page 3]\nExclusions\n" in whole["text"]
+    assert "next_page" not in whole
+
+    monkeypatch.setattr("home_brain.index.READ_CHARS", 120)
+    part = index.read_attachment("house/policy.pdf")
+    assert (part["last_page"], part["next_page"]) == (1, 2)
+    assert index.read_attachment("house/policy.pdf", 2, 2)["text"].startswith("[Page 2]\nCover")
+
+    with pytest.raises(VaultError, match="has only 3 pages"):
+        index.read_attachment("house/policy.pdf", 4)
+    with pytest.raises(VaultError, match="attachment not found"):
+        index.read_attachment("house/missing.pdf")
+
+
+def test_unreadable_attachment(vault: Vault, index: Index) -> None:
+    add_pdf(vault, "inbox/scan.pdf", make_pdf(""))
+    with pytest.raises(VaultError, match="probably a scan. Ask the user to attach the PDF in the chat"):
+        index.read_attachment("inbox/scan.pdf")
+
+
+def test_attachment_changes_are_picked_up(vault: Vault, index: Index) -> None:
+    index.refresh(force=True)
+    add_pdf(vault, "inbox/a.pdf")
+    assert index.refresh(force=True) == {"added": 1, "updated": 0, "removed": 0}
+    add_pdf(vault, "inbox/a.pdf", make_pdf("Car insurance\nKasko"))
+    assert index.refresh(force=True) == {"added": 0, "updated": 1, "removed": 0}
+    assert index.search_attachments("deductible") == []
+    assert [h["path"] for h in index.search_attachments("kasko")] == ["inbox/a.pdf"]
+    os.remove(vault.root / "inbox" / "a.pdf")
+    assert index.refresh(force=True) == {"added": 0, "updated": 0, "removed": 1}
+    assert index.search_attachments("kasko") == []
+
+
+def test_linked_from(vault: Vault, index: Index) -> None:
+    vault.patch("house/house.md", set_frontmatter={"attachments": ["house/policy.pdf", "house/manual.pdf"]})
+    vault.patch("people/me.md", set_frontmatter={"attachments": "house/policy.pdf"})
+    assert index.linked_from("house/policy.pdf") == {
+        "house/house.md": ["house/policy.pdf", "house/manual.pdf"],
+        "people/me.md": "house/policy.pdf",
+    }
+    assert index.linked_from("house/other.pdf") == {}
 
 
 def test_index_survives_schema_change(vault: Vault, tmp_path) -> None:

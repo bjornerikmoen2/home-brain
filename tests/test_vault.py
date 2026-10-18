@@ -130,6 +130,25 @@ def test_seed_never_overwrites(vault: Vault) -> None:
     assert (vault.root / "_conventions.md").is_file()
 
 
+def test_attachments_can_be_moved_and_deleted_but_stay_pdfs(vault: Vault) -> None:
+    (vault.root / "inbox" / "scan.pdf").write_bytes(b"%PDF")
+    (vault.root / ".trash").mkdir()
+    (vault.root / ".trash" / "old.pdf").write_bytes(b"%PDF")
+    assert [f.path for f in vault.iter_attachments()] == ["inbox/scan.pdf"]
+
+    assert vault.move("inbox/scan.pdf", "house/home-insurance-2026") == ("inbox/scan.pdf", "house/home-insurance-2026.pdf")
+    with pytest.raises(VaultError, match="same file type"):
+        vault.move("house/home-insurance-2026.pdf", "house/home-insurance.md")
+    with pytest.raises(VaultError, match="attachment not found"):
+        vault.move("inbox/scan.pdf", "house/other.pdf")
+    with pytest.raises(VaultError, match="ends in .pdf"):
+        vault.attachment_path("house/house.md")
+
+    rel, trashed = vault.delete("house/home-insurance-2026.pdf")
+    assert (vault.root / trashed).read_bytes() == b"%PDF"
+    assert list(vault.iter_attachments()) == []
+
+
 def test_iter_notes_skips_hidden_and_non_markdown(vault: Vault) -> None:
     (vault.root / ".obsidian").mkdir()
     (vault.root / ".obsidian" / "x.md").write_text("x", encoding="utf-8")

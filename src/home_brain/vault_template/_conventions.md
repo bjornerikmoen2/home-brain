@@ -47,6 +47,7 @@ tools. These rules keep it tidy and machine-readable. Edit this file to change h
 | `recurring` | Routine items: `rrule` (RFC 5545), `title`, optional `who`, `time`, `end_time`, `where`, `bring`, `from`, `until`, `exdates` | `rrule: "FREQ=WEEKLY;BYDAY=TU"` |
 | `due` | Deadlines: `date`, `title`, `warn_days` (how early to warn, default 14), `done` | EU-kontroll, insurance |
 | `reminders` | One-off reminders: `at` (date or date-time), `text`, optional `who`, `done`. Add them with the `remind` tool | |
+| `attachments` | PDFs in the vault that belong to this note (vault paths) | `attachments: [house/home-insurance-2026.pdf]` |
 
 ```yaml
 events:
@@ -103,6 +104,18 @@ the `chores` tool for "has Ola done her chores?" (`agenda` lists them too) and `
 points, allowance and chores waiting for approval. When the user asks, approve done chores with
 `approve_chores` (the `id`s from `scoreboard`), reject one that wasn't done with `reject_chore`,
 and give bonus points with `award_points`; say what was approved and how many points were given.
+
+**Documents (PDF attachments)**
+You can't save a file the user attaches in the chat. To keep the PDF itself (insurance policies,
+contracts, manuals), ask them to copy it into the vault's `inbox/` folder over the network share.
+1. `list_notes` lists PDFs under `attachments`; read one with `read_attachment`.
+2. File it with `move_note` into the folder of the note it belongs to, with a kebab-case name that
+   says what and when: `house/home-insurance-2026.pdf`.
+3. List it under `attachments` in every note it concerns. Moving or deleting a PDF with the tools
+   updates these lists.
+4. Put the key facts (price, cover, deductibles, renewal date as `due`) in the notes. For details,
+   `search_notes` also finds pages inside PDFs; read them and name the page you answer from.
+5. A scanned PDF has no text to read: ask the user to attach it in the chat instead.
 
 **Tires and car service**
 Keep current tire facts in the vehicle's `tires` frontmatter (size, bought, tread depth and when it

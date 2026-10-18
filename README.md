@@ -61,18 +61,18 @@ see [docs/deploy.md](docs/deploy.md).
 
 | Tool | What it does |
 |---|---|
-| `search_notes` | Keyword search over titles, tags, frontmatter and body (SQLite FTS5, prefix matching, diacritics-insensitive) |
+| `search_notes` | Keyword search over titles, tags, frontmatter and body (SQLite FTS5, prefix matching, diacritics-insensitive), plus the pages of PDF attachments |
 | `read_note` | Read a whole note |
-| `list_notes` | Browse a folder: notes plus subfolders, optional `note_type` filter |
+| `read_attachment` | Read the text of a PDF in the vault, page by page |
+| `list_notes` | Browse a folder: notes, PDF attachments and subfolders, optional `note_type` filter |
 | `write_note` | Create a note (or replace with `overwrite`), validating the frontmatter |
 | `patch_note` | Merge frontmatter (JSON merge patch), append to frontmatter lists, append text under a heading; preserves comments and formatting |
-| `move_note` | Rename/refile a note, never overwrites |
-| `delete_note` | Soft delete into `.trash/` |
+| `move_note` | Rename/refile a note or PDF, never overwrites; notes linking to a moved PDF follow it |
+| `delete_note` | Soft delete of a note or PDF into `.trash/` |
 | `agenda` | Everything dated for one or more days: events, weekly routines (RRULE), birthdays, deadlines and reminders, with a per-person packing list; plus upcoming deadlines within their warning window |
 | `remind` | Save a one-off reminder in `reminders.md` (at a date-time, or `+15m` / `+2h` / `+3d` from now); it is pushed to the phone when due |
 | `notify` | Push a message to the phone right now (only when ntfy is configured) |
 | `chores` | The chores from [Home-Board](https://github.com/bjornerikmoen2/home-board) per person: done and still to do, plus shared ones (only when Home-Board is configured) |
-
 | `scoreboard` | Points per child from Home-Board: scoreboard total, this week and month, the next payout, chores waiting for a parent's approval |
 
 With Home-Board configured, `agenda` (up to 7 days) and the evening briefing also list the chores,
@@ -81,6 +81,12 @@ and the evening briefing says which done chores are waiting for approval.
 Dates in `events`, `recurring`, `due`, `reminders` and `birthday` are validated when a note is
 saved; see the vault's `_conventions.md` for the fields, including `cancels` (skip a routine item
 on one day) and `break: true` (school holidays).
+
+**PDF attachments.** Claude can't store a file you attach in the chat, so copy PDFs (insurance
+policies, contracts, manuals) into the vault yourself, e.g. into `inbox/` over an SMB share. home-brain
+extracts their text page by page ([pypdf](https://pypi.org/project/pypdf/)) into the search index;
+Claude files them next to their notes and lists them under `attachments` in the frontmatter.
+Scanned PDFs without a text layer can't be read (no OCR).
 
 The server's instructions to Claude are the contents of the vault's `_conventions.md`, so editing
 that file (and restarting) changes how Claude files things.

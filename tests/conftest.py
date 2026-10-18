@@ -111,6 +111,49 @@ class FakeNotifier:
         self.sent.append(message)
 
 
+def make_pdf(*pages: str) -> bytes:
+    """A small PDF with the given text per page (Helvetica, so Norwegian letters work); "" makes a
+    page without text, like a scan."""
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"",  # the page tree, filled in below
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]
+    kids = []
+    for text in pages:
+        shown = b" T* ".join(b"(" + _pdf_string(line) + b") Tj" for line in text.split("\n"))
+        stream = b"BT /F1 12 Tf 14 TL 50 800 Td " + shown + b" ET"
+        objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >>"
+            b" /Contents %d 0 R >>" % len(objects)
+        )
+        kids.append(len(objects))
+    objects[1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % k for k in kids), len(kids))
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+def _pdf_string(text: str) -> bytes:
+    return text.encode("cp1252").replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
+
+
+POLICY_PDF = make_pdf(
+    "Home insurance policy 2026\nPolicyholder: Ola Nordmann\nAnnual price: 12 000 kr",
+    "Cover: building and contents\nDeductible: 8 000 kr",
+    "Exclusions\nSnow damage to the roof is covered when the snow was cleared.\nGlass breakage: deductible 3 000 kr",
+)
+"""An example insurance policy: three pages of text."""
+
+
 @pytest.fixture
 def notifier() -> FakeNotifier:
     return FakeNotifier()
