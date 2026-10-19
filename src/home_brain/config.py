@@ -37,7 +37,7 @@ class Settings:
     github_client_id: str | None = None
     github_client_secret: str | None = field(default=None, repr=False)
     allowed_users: frozenset[str] = frozenset()
-    """GitHub logins (lowercase) that may use the server."""
+    """GitHub user IDs (numbers, preferred) or logins (lowercase) that may use the server."""
     jwt_signing_key: str | None = field(default=None, repr=False)
     """Optional key for the tokens home-brain issues to Claude; defaults to one derived from the client secret."""
 
@@ -124,7 +124,7 @@ class Settings:
         if missing:
             raise ConfigError(f"AUTH_PROVIDER=github needs {', '.join(missing)}")
         if not self.allowed_users:
-            raise ConfigError("AUTH_PROVIDER=github needs ALLOWED_USERS (comma-separated GitHub logins)")
+            raise ConfigError("AUTH_PROVIDER=github needs ALLOWED_USERS (comma-separated GitHub user IDs or logins)")
         url = urlparse(self.public_url or "")
         if url.scheme not in ("https", "http") or not url.netloc:
             raise ConfigError(f"PUBLIC_URL must be a full URL like https://brain.example.com, not {self.public_url!r}")

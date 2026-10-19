@@ -133,7 +133,7 @@ For the real deployment (NAS vault over NFS, GitHub login, Cloudflare Tunnel) us
 | `AUTH_PROVIDER` | `none` | `github` turns on GitHub login (HTTP only; stdio never needs it) |
 | `PUBLIC_URL` | | Public HTTPS address, e.g. `https://brain.example.com` |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | | GitHub OAuth App credentials |
-| `ALLOWED_USERS` | | Comma-separated GitHub logins allowed to use the server |
+| `ALLOWED_USERS` | | Comma-separated GitHub user IDs (preferred; a login can change hands) or logins allowed to use the server |
 | `OAUTH_JWT_SIGNING_KEY` | derived from the client secret | Key for the tokens home-brain issues to Claude |
 | `NTFY_URL` | | ntfy server to publish to, e.g. `http://ntfy`; push notifications are off when empty |
 | `NTFY_TOPIC` | `home-brain` | ntfy topic for all messages |

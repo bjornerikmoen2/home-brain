@@ -13,8 +13,10 @@ Cloudflare Tunnel ──► home-brain container ──► ntfy container   (Doc
                        vault on the NAS (NFS), ZFS snapshots
 ```
 
-Only the GitHub logins in `ALLOWED_USERS` get access. Anyone else can complete the GitHub
-login but sees no tools.
+Only the GitHub accounts in `ALLOWED_USERS` get access. Anyone else can complete the GitHub
+login, but every request with their token is refused (401), the MCP handshake included. List
+numeric user IDs (the `id` at `https://api.github.com/users/<login>`) rather than logins: a
+renamed login can be registered by someone else. Logins still work, with a warning in the log.
 
 Not part of this step yet: pushing the vault's git history to a private GitHub repo. Until then,
 ZFS snapshots on the NAS are the backup.
@@ -252,7 +254,7 @@ briefing say so instead of silently leaving its events out.
 | Symptom | Check |
 |---|---|
 | "Authorization with the MCP server failed" | `PUBLIC_URL` is exactly `https://brain.<domain>` (no trailing slash); the GitHub app's callback is `PUBLIC_URL/auth/callback`; `docker logs home-brain` |
-| Connected, but no tools | Your GitHub login isn't in `ALLOWED_USERS`; the log says `denied GitHub user` |
+| GitHub login works, then Claude can't connect | Your GitHub account isn't in `ALLOWED_USERS`; the log says `denied GitHub user '<login>' (ID <id>)` |
 | Container won't start: `mount ... failed` | The NFS export path, *Authorized Hosts* on the share, `NAS_NFS_VERSION` (NFSv4 must be enabled on the NAS for `4.1`) |
 | `Permission denied` on `/vault` | `HOME_BRAIN_UID/GID` match the dataset owner; the share's *Mapall* user; dataset mode `770` |
 | Changed `NAS_*` in `.env` | `docker compose down && docker volume rm home-brain-vault`, then `docker compose up -d` |

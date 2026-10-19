@@ -222,7 +222,10 @@ Notes:
 ## Security
 
 - OAuth 2.1 via FastMCP OAuth proxy (GitHub or Google), plus an explicit allowlist check on the
-  authenticated identity — reject everyone else even if they have a valid provider login.
+  authenticated identity — reject everyone else even if they have a valid provider login. The
+  check runs when the token is verified (401 before the MCP handshake, whose instructions hold
+  the vault conventions) and again on every tool/resource/prompt. Match GitHub user IDs, not
+  logins: a renamed login can be registered by someone else.
 - All paths resolved and confined to the vault root (no `..`, no symlinks out). No shell/exec tools.
 - No hard delete: `.trash/` + git history. Every write = commit with a descriptive message.
 - Secrets only in `.env` / Docker secrets; the code repo never contains vault data.
@@ -260,7 +263,7 @@ Notes:
 `school/<kid>/2026-wNN.md`, and "what's on Thursday?" finds it.
 
 ### Phase 1 — In the Claude app
-- [x] FastMCP OAuth proxy (GitHub, `read:user` only) + `ALLOWED_USERS` check on every tool list/call
+- [x] FastMCP OAuth proxy (GitHub, `read:user` only) + `ALLOWED_USERS` check on every request (token) and every tool list/call
 - [x] Git commit per write in the vault (outside edits included in the next commit)
 - [x] `server-docker-compose.yml` with the NFS vault volume; all site values in `.env`
 - [x] Image built and pushed to GHCR via GitHub Actions (same pattern as home-board)
