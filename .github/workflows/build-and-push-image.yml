@@ -9,6 +9,10 @@ on:
   pull_request:
     branches:
       - main
+  # Weekly rebuild, so fixes in the base image and in newer package versions reach the image
+  # even when the code doesn't change.
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 env:
@@ -40,6 +44,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     steps:
       - name: Checkout repository
@@ -67,9 +72,41 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
+          pull: true
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Scan the image that was just pushed. Findings go to the repository's Security tab; a
+      # fixable critical vulnerability fails the run (after the push, so it never blocks a fix).
+      - name: Scan image for vulnerabilities
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload scan results to the Security tab
+        if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-results.sarif
+          category: image
+
+      - name: Fail on fixable critical vulnerabilities
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-setup-trivy: true

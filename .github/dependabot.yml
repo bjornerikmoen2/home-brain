@@ -1,0 +1,22 @@
+# Weekly pull requests for newer Python packages and GitHub Actions.
+# Security fixes in the base image (python:3.12-slim) arrive through the weekly rebuild in CI.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-packages:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
