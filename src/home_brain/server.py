@@ -37,6 +37,7 @@ from .homeboard import (
 from .index import Index
 from .notify import Message, Notifier, NotifyError, Ntfy, Priority
 from .scheduler import Scheduler
+from .texts import LANGUAGES
 from .vault import Vault, VaultError
 
 log = logging.getLogger(__name__)
@@ -591,7 +592,7 @@ def create_server(
     if run_scheduler and notifier is not None:
         Scheduler(
             vault, index, notifier, settings.data_path / "scheduler.db", settings.briefing_time,
-            homeboard=homeboard, calendars=calendars,
+            homeboard=homeboard, calendars=calendars, texts=LANGUAGES[settings.notify_language],
         ).start()
 
     @mcp.custom_route("/health", methods=["GET"])

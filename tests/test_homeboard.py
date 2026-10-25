@@ -10,6 +10,8 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from conftest import CHORES, FEED_CAT_ID, MON, NORA_ID, OLA_ID, POINTS, TUE
 
+from home_brain.texts import NB
+
 from home_brain.homeboard import (
     HomeBoard,
     HomeBoardError,
@@ -187,6 +189,8 @@ def test_points_report_for_one_child() -> None:
 def test_waiting_summary() -> None:
     assert waiting_summary(POINTS) == ["Nora: 1 chore (10 points)"]
     assert waiting_summary({"users": [{"name": "Ola", "waitingForApproval": [{"points": 5}, {"points": 10}]}]}) == ["Ola: 2 chores (15 points)"]
+    assert waiting_summary(POINTS, NB) == ["Nora: 1 oppgave (10 poeng)"]
+    assert waiting_summary({"users": [{"name": "Ola", "waitingForApproval": [{"points": 5}, {"points": 10}]}]}, NB) == ["Ola: 2 oppgaver (15 poeng)"]
 
 
 def test_slug() -> None:

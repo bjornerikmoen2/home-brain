@@ -103,7 +103,8 @@ topic (the stdio server never does, so a local copy can't send duplicates):
 | Week ahead: events, birthdays and deadlines, without the weekly routine | Sundays at 18:00 |
 | Monday check: deadlines within their warning time, birthdays in the next 14 days with gift ideas, tire tread, age and change season, broken dates | Mondays at 08:00, only if there is something to report |
 
-The texts are fixed templates built from `agenda`, so they match what Claude answers. What was
+The texts are fixed templates built from `agenda`, so they match what Claude answers; they are in
+English or Norwegian (`NOTIFY_LANGUAGE`). What was
 sent is recorded in `DATA_PATH/scheduler.db`, not in the vault, so nothing is sent twice. After a
 restart or an ntfy outage, anything missed in the last 6 hours (the same day, for briefings) is
 sent late. Notes with `example: true` are ignored.
@@ -139,6 +140,7 @@ For the real deployment (NAS vault over NFS, GitHub login, Cloudflare Tunnel) us
 | `NTFY_TOPIC` | `home-brain` | ntfy topic for all messages |
 | `NTFY_TOKEN` | | Access token of the ntfy user home-brain publishes as |
 | `BRIEFING_TIME` | `19:00` | When the evening briefing about tomorrow is sent |
+| `NOTIFY_LANGUAGE` | `en` | Language of the pushed messages: `en`, or `nb` for Norwegian (Bokmål) |
 | `HOMEBOARD_URL` | | Home-Board's API, e.g. `http://home-board-api:8080`; chores are off when empty |
 | `HOMEBOARD_API_KEY` | | Home-Board's `Integrations__ApiKey` |
 
@@ -162,6 +164,7 @@ src/home_brain/
   config.py        settings from environment variables, with validation
   notify.py        ntfy client
   briefing.py      texts of the pushed reminders, briefings and Monday check
+  texts.py         their words and dates in English and Norwegian (NOTIFY_LANGUAGE)
   scheduler.py     background loop: what is due, sending, record of what was sent
   homeboard.py     chores from Home-Board's API-key endpoint, as a report and as agenda items
   server.py        FastMCP server and tools

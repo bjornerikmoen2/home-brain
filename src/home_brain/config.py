@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
+from .texts import LANGUAGES
+
 
 class ConfigError(ValueError):
     """Settings that can't work together; the message says what to fix."""
@@ -48,6 +50,8 @@ class Settings:
     """Access token of the ntfy user home-brain publishes as."""
     briefing_time: dt.time = dt.time(19, 0)
     """When the evening briefing about tomorrow is pushed."""
+    notify_language: str = "en"
+    """Language of the push notifications: `en` or `nb` (Norwegian Bokmål; `no` also works)."""
 
     homeboard_url: str | None = None
     """home-board's API, e.g. http://home-board-api:8080; chores are off when unset."""
@@ -80,6 +84,7 @@ class Settings:
             ntfy_topic=env.get("NTFY_TOPIC") or "home-brain",
             ntfy_token=env.get("NTFY_TOKEN") or None,
             briefing_time=parse_time("BRIEFING_TIME", env.get("BRIEFING_TIME") or "19:00"),
+            notify_language=(env.get("NOTIFY_LANGUAGE") or "en").strip().lower(),
             homeboard_url=env.get("HOMEBOARD_URL") or None,
             homeboard_api_key=env.get("HOMEBOARD_API_KEY") or None,
             homeboard_write_key=env.get("HOMEBOARD_WRITE_KEY") or None,
@@ -89,6 +94,8 @@ class Settings:
         return settings
 
     def validate(self) -> None:
+        if self.notify_language not in LANGUAGES:
+            raise ConfigError(f"NOTIFY_LANGUAGE must be one of {', '.join(LANGUAGES)}, not {self.notify_language!r}")
         if self.ntfy_url:
             url = urlparse(self.ntfy_url)
             if url.scheme not in ("https", "http") or not url.netloc:

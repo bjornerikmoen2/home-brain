@@ -9,6 +9,7 @@ from home_brain import briefing, frontmatter
 from home_brain.agenda import Note, build
 from home_brain.homeboard import agenda_items
 from home_brain.index import Index
+from home_brain.texts import NB
 from home_brain.vault import Vault
 
 MON = dt.date(2026, 10, 19)
@@ -160,3 +161,82 @@ def test_line_and_names() -> None:
     assert briefing.line(item) == "Autumn break (until Sun 4 Oct) (Ola, you)"
     item = {"kind": "due", "title": "EU-kontroll", "time": "08:00", "end_time": "09:00", "who": ["nora-marie"]}
     assert briefing.line(item) == "08:00–09:00 Due: EU-kontroll (Nora Marie)"
+
+
+# --- in Norwegian (NOTIFY_LANGUAGE=nb) -------------------------------------------
+
+
+def test_tomorrow_in_norwegian(notes: list[Note]) -> None:
+    day = dt.date(2026, 10, 24)
+    message = briefing.tomorrow(day_agenda(notes, day), day, t=NB)
+    assert message.title == "I morgen: lørdag 24. oktober"
+    assert message.text == "14:00 Per's birthday party (Ola), Eksempelveien 12\n\nTa med:\nOla: present"
+    day = dt.date(2026, 10, 20)
+    message = briefing.tomorrow(build(notes, day, day, MON, extra=agenda_items(CHORES, MON)), day, t=NB)
+    assert message.text == (
+        "Gym (Ola)\n\nTa med:\nOla: gym clothes, indoor shoes\n\n"
+        "Oppgaver:\nOla: Make bed (innen 08:00)\nKids (felles): Empty dishwasher"
+    )
+    quiet = briefing.tomorrow(build([], day, day, MON), day, waiting=["Nora: 1 oppgave (10 poeng)"], warnings=["Oops."], t=NB)
+    assert quiet.text == "Ingenting på planen.\n\nVenter på verifisering:\nNora: 1 oppgave (10 poeng)\n\n⚠ Oops."
+
+
+def test_week_ahead_in_norwegian(notes: list[Note]) -> None:
+    end = MON + dt.timedelta(days=6)
+    message = briefing.week_ahead(build(notes, MON, end, MON), MON, end, t=NB)
+    assert message.title == "Uka som kommer: 19. okt. – 25. okt."
+    assert message.text.splitlines()[0] == "ons. 21. okt.: Forest trip (Ola)"
+    quiet = briefing.week_ahead(build([], MON, end, MON), MON, end, t=NB)
+    assert quiet.text == "Bare vanlig rutine denne uka."
+
+
+def test_monday_check_in_norwegian(notes: list[Note], vault: Vault) -> None:
+    message = briefing.maintenance(notes, MON, lambda path: frontmatter.split(vault.read(path)[1])[1], t=NB)
+    assert message is not None
+    assert message.title == "Mandagssjekk"
+    assert message.text == (
+        "Frister\n"
+        "• Change ventilation filter: søn. 1. nov. (om 13 dager)\n"
+        "\n"
+        "Bursdager\n"
+        "• Kari Nordmann fyller 38: man. 2. nov.\n"
+        "  Gaveideer: Pottery course (mentioned 2026-09-12); New thermos for hiking\n"
+        "\n"
+        "Dekk\n"
+        "• Family car: på tide å bytte til vinterdekk? (sist byttet fre. 10. apr. 2026)"
+    )
+    house = Note("house/log.md", "Log", {"due": [{"date": "2026-10-16", "title": "Pay the plumber"}, {"date": "2026-10-19", "title": "Book chimney sweep"}]})
+    broken = Note("events/x.md", "X", {"events": [{"date": "2026-10-32", "title": "Typo"}]})
+    message = briefing.maintenance([house, broken], MON, lambda path: "", t=NB)
+    assert message is not None
+    assert "• Book chimney sweep: man. 19. okt. (i dag)\n• Pay the plumber: fre. 16. okt. (3 dager over fristen)" in message.text
+    assert "Datoer Claude bør rette i notatene\n• events/x.md: events[0].date:" in message.text
+
+
+@pytest.mark.parametrize(
+    ("tires", "changes", "today", "expected"),
+    [
+        ({"winter": {"tread_mm": 3.5}}, ["2026-10-01"], MON, "Car: vinterdekkene har 3,5 mm mønsterdybde (lovlig minimum 3 mm)"),
+        ({"summer": {"tread_mm": 1.5}}, [], MON, "Car: sommerdekkene har 1,5 mm mønsterdybde (lovlig minimum 1,6 mm)"),
+        ({"winter": {"bought": "2019-10"}}, ["2026-10-01"], MON, "Car: vinterdekkene er 7 år gamle (kjøpt 2019-10)"),
+        ({"winter": {"studded": True}}, [], MON, "Car: på tide å bytte til vinterdekk? Piggdekk er lov fra 1. november."),
+        ({"winter": {"studded": True}}, [], dt.date(2027, 3, 22), "Car: på tide å bytte til sommerdekk? Etter søn. 4. apr. må piggdekkene av."),
+    ],
+)
+def test_tire_checks_in_norwegian(tires: dict, changes: list[str], today: dt.date, expected: str) -> None:
+    car = Note("vehicles/car.md", "car", {"name": "Car", "tires": tires, "tire_changes": changes})
+    message = briefing.maintenance([car], today, lambda path: "", t=NB)
+    assert message is not None and message.text == f"Dekk\n• {expected}"
+
+
+def test_reminders_and_lines_in_norwegian() -> None:
+    due = dt.datetime(2026, 10, 20, 18, 0)
+    assert briefing.reminder("Pakk gymtøy", ["ola", "me"], due, due, NB).title == "Påminnelse for Ola"
+    late = briefing.reminder("Kjøp melk", ["me"], due, dt.datetime(2026, 10, 21, 0, 30), NB)
+    assert (late.title, late.text) == ("Påminnelse", "Kjøp melk\n(skulle kommet tir. 20. okt. 18:00)")
+    item = {"kind": "break", "title": "Høstferie", "until": "2026-10-04", "who": ["ola", "me"]}
+    assert briefing.line(item, NB) == "Høstferie (til søn. 4. okt.) (Ola, du)"
+    item = {"kind": "due", "title": "EU-kontroll", "time": "08:00", "who": ["nora-marie"]}
+    assert briefing.line(item, NB) == "08:00 Frist: EU-kontroll (Nora Marie)"
+    item = {"kind": "birthday", "title": "Kari's birthday", "name": "Kari", "age": 0, "who": ["kari"]}
+    assert (briefing.line(item, NB), briefing.line(item)) == ("Kari har bursdag", "Kari's birthday")

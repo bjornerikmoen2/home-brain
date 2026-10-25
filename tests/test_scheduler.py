@@ -10,6 +10,7 @@ from conftest import FakeFeeds, FakeHomeBoard, FakeNotifier, fake_calendars
 
 from home_brain.index import Index
 from home_brain.scheduler import Scheduler
+from home_brain.texts import NB
 from home_brain.vault import Vault
 
 REMINDERS = """\
@@ -131,6 +132,23 @@ def test_evening_briefing_when_the_calendar_is_down(scheduler_for: Callable[...,
     assert "tomorrow:2026-10-20" in scheduler.tick(at(20, 19, 0))
     assert notifier.sent[-1].text.endswith(
         "09:00 Dentist (you)\n\n⚠ Calendar 'calendar 1' could not be read: the feed is not a valid iCal file"
+    )
+
+
+def test_messages_in_norwegian(scheduler_for: Callable[..., Scheduler], notifier: FakeNotifier) -> None:
+    scheduler = scheduler_for(
+        notifier, texts=NB, homeboard=FakeHomeBoard(error="unreachable"), calendars=fake_calendars(FakeFeeds({}))
+    )
+    assert scheduler.tick(at(20, 18, 0)) == ["reminder:r-1"]
+    assert scheduler.tick(at(20, 19, 0)) == ["tomorrow:2026-10-20"]
+    reminder, evening = notifier.sent
+    assert (reminder.title, reminder.text) == ("Påminnelse for Ola", "Pack gym clothes")
+    assert evening.title == "I morgen: onsdag 21. oktober"
+    assert evening.text == (
+        "Påminnelse: Forest trip: rain gear\n"
+        "09:00 Dentist (du)\n\n"
+        "⚠ Kalenderen «kalender 1» kunne ikke leses.\n"
+        "⚠ Fikk ikke kontakt med Home-Board, så oppgavene mangler."
     )
 
 

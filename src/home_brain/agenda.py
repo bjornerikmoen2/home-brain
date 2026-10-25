@@ -366,7 +366,7 @@ def _birthdays(note: Note, born: dt.date, start: dt.date, end: dt.date) -> list[
             age = year - born.year
             title = f"{name}'s birthday" + (f" (turns {age})" if age > 0 else "")
             found.append(Item(date=day, kind="birthday", title=title, source=note.path,
-                              who=[PurePosixPath(note.path).stem.lower()], extra={"age": age}))
+                              who=[PurePosixPath(note.path).stem.lower()], extra={"age": age, "name": name}))
     return found
 
 

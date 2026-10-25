@@ -178,7 +178,7 @@ with a token, and the phone app logs in as you.
    messages arrive instantly. The web app at `https://ntfy.<domain>` works too.
 5. **Check.** Ask Claude to "send a test notification to my phone" (the `notify` tool), and
    "remind me in five minutes to check the oven". The evening briefing arrives at
-   `BRIEFING_TIME`.
+   `BRIEFING_TIME`. Set `NOTIFY_LANGUAGE=nb` for the briefings and reminders in Norwegian.
 
 Other services can use the same ntfy server, for example for backup alerts: give each its own
 topic, user and token.

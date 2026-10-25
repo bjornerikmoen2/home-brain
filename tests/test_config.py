@@ -24,7 +24,7 @@ NTFY_ENV = {
 
 def env(monkeypatch: pytest.MonkeyPatch, values: dict[str, str]) -> None:
     for key in (*GITHUB_ENV, *NTFY_ENV, "HOMEBOARD_URL", "HOMEBOARD_API_KEY", "HOMEBOARD_WRITE_KEY", "VAULT_PATH", "DATA_PATH", "VAULT_GIT",
-                "OAUTH_JWT_SIGNING_KEY", "CALENDAR_URLS"):
+                "OAUTH_JWT_SIGNING_KEY", "CALENDAR_URLS", "NOTIFY_LANGUAGE"):
         monkeypatch.delenv(key, raising=False)
     for key, value in values.items():
         monkeypatch.setenv(key, value)
@@ -118,6 +118,16 @@ def test_invalid_auth_settings(monkeypatch: pytest.MonkeyPatch, override: dict[s
 def test_http_localhost_is_allowed_for_testing(monkeypatch: pytest.MonkeyPatch) -> None:
     env(monkeypatch, {**GITHUB_ENV, "PUBLIC_URL": "http://localhost:8000"})
     assert Settings.from_env().public_url == "http://localhost:8000"
+
+
+def test_notify_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    env(monkeypatch, {})
+    assert Settings.from_env().notify_language == "en"
+    env(monkeypatch, {"NOTIFY_LANGUAGE": " NB "})
+    assert Settings.from_env().notify_language == "nb"
+    env(monkeypatch, {"NOTIFY_LANGUAGE": "de"})
+    with pytest.raises(ConfigError, match="NOTIFY_LANGUAGE must be one of en, nb, no, not 'de'"):
+        Settings.from_env()
 
 
 def test_parse_users() -> None:

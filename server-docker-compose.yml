@@ -23,6 +23,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-home-brain}
       NTFY_TOKEN: ${NTFY_TOKEN:-}
       BRIEFING_TIME: ${BRIEFING_TIME:-19:00}
+      NOTIFY_LANGUAGE: ${NOTIFY_LANGUAGE:-en}
       # Chores from Home-Board; off while HOMEBOARD_URL is empty (docs/deploy.md, step 7).
       HOMEBOARD_URL: ${HOMEBOARD_URL:-}
       HOMEBOARD_API_KEY: ${HOMEBOARD_API_KEY:-}

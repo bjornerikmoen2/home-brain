@@ -27,6 +27,7 @@ import recurring_ical_events
 
 from .agenda import Item
 from .config import Settings
+from .texts import EN, Texts
 
 log = logging.getLogger(__name__)
 
@@ -68,9 +69,10 @@ class Calendars:
     def from_settings(cls, settings: Settings) -> Calendars | None:
         return cls(list(settings.calendar_urls)) if settings.calendar_urls else None
 
-    def items(self, start: dt.date, end: dt.date) -> tuple[list[Item], list[str]]:
+    def items(self, start: dt.date, end: dt.date, t: Texts = EN) -> tuple[list[Item], list[str]]:
         """The events on the days start..end (inclusive) from every calendar, and a warning for
-        each calendar that could not be read. One broken feed doesn't hide the others."""
+        each calendar that could not be read (in the words of `t`). One broken feed doesn't hide
+        the others."""
         found: list[Item] = []
         warnings: list[str] = []
         for number, url in enumerate(self._urls, 1):
@@ -78,9 +80,9 @@ class Calendars:
                 calendar = self._calendar(url)
                 found += events(calendar, start, end, self._names.get(url), self._tz)
             except CalendarError as exc:
-                name = self._names.get(url) or f"calendar {number}"
-                log.warning("%s could not be read: %s", name, exc)
-                warnings.append(f"Calendar {name!r} could not be read: {exc}")
+                log.warning("%s could not be read: %s", self._names.get(url) or f"calendar {number}", exc)
+                name = self._names.get(url) or t.unnamed_calendar.format(number=number)
+                warnings.append(t.calendar_unreadable.format(name=name, reason=exc))
         return found, warnings
 
     def _calendar(self, url: str) -> icalendar.Calendar:

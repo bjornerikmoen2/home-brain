@@ -32,6 +32,7 @@ from .frontmatter import FrontmatterError
 from .homeboard import HomeBoard, HomeBoardError, agenda_items, waiting_summary
 from .index import Index
 from .notify import Message, Notifier, NotifyError
+from .texts import EN, Texts
 from .vault import Vault, VaultError
 
 log = logging.getLogger(__name__)
@@ -63,12 +64,14 @@ class Scheduler:
         clock: Callable[[], dt.datetime] = dt.datetime.now,
         homeboard: HomeBoard | None = None,
         calendars: Calendars | None = None,
+        texts: Texts = EN,
     ) -> None:
         self._vault = vault
         self._index = index
         self._notifier = notifier
         self._homeboard = homeboard
         self._calendars = calendars
+        self._texts = texts
         self._clock = clock
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -140,7 +143,7 @@ class Scheduler:
                 due = dt.datetime.combine(day, dt.time.fromisoformat(clock) if clock else DATE_ONLY_AT)
                 if due <= now < due + CATCH_UP:
                     who = people(raw.get("who")) or people(note.meta.get("who"))
-                    yield _reminder_key(note.path, raw, due, text), partial(briefing.reminder, text, who, due, now)
+                    yield _reminder_key(note.path, raw, due, text), partial(briefing.reminder, text, who, due, now, self._texts)
         today = now.date()
         for job in self.jobs:
             slot = dt.datetime.combine(today, job.at)
@@ -159,27 +162,27 @@ class Scheduler:
                 extra += agenda_items(self._homeboard.chores(day, day), today)
             except HomeBoardError as exc:
                 log.warning("tomorrow's briefing goes out without chores: %s", exc)
-                warnings.append("Home-Board could not be reached, so the chores are missing.")
+                warnings.append(self._texts.homeboard_unreachable)
             try:
-                waiting = waiting_summary(self._homeboard.points())
+                waiting = waiting_summary(self._homeboard.points(), self._texts)
             except HomeBoardError as exc:
                 log.warning("tomorrow's briefing goes out without approvals: %s", exc)
-        return briefing.tomorrow(build_agenda(notes, day, day, today, extra=extra), day, waiting, warnings)
+        return briefing.tomorrow(build_agenda(notes, day, day, today, extra=extra), day, waiting, warnings, self._texts)
 
     def _week_ahead(self, notes: list[Note], today: dt.date) -> Message:
         start = today + dt.timedelta(days=1)
         end = start + dt.timedelta(days=6)
         extra, warnings = self._events(start, end)
-        return briefing.week_ahead(build_agenda(notes, start, end, today, extra=extra), start, end, warnings)
+        return briefing.week_ahead(build_agenda(notes, start, end, today, extra=extra), start, end, warnings, self._texts)
 
     def _events(self, start: dt.date, end: dt.date) -> tuple[list[Item], list[str]]:
         """Calendar events (e.g. Google Calendar) and why any are missing."""
         if self._calendars is None:
             return [], []
-        return self._calendars.items(start, end)
+        return self._calendars.items(start, end, self._texts)
 
     def _maintenance(self, notes: list[Note], today: dt.date) -> Message | None:
-        return briefing.maintenance(notes, today, self._body)
+        return briefing.maintenance(notes, today, self._body, self._texts)
 
     def _body(self, path: str) -> str:
         try:

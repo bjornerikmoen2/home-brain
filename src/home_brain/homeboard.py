@@ -20,6 +20,7 @@ from typing import Any
 
 from .agenda import Item
 from .config import Settings
+from .texts import EN, Texts
 
 log = logging.getLogger(__name__)
 
@@ -236,14 +237,15 @@ def points_report(raw: dict[str, Any], who: str | None = None) -> dict[str, Any]
     return report
 
 
-def waiting_summary(raw: dict[str, Any]) -> list[str]:
+def waiting_summary(raw: dict[str, Any], t: Texts = EN) -> list[str]:
     """One line per child with chores waiting for approval, e.g. `Ola: 2 chores (20 points)`."""
     lines = []
     for user in raw.get("users", []):
         waiting = user.get("waitingForApproval") or []
         if waiting:
             points = sum(int(w.get("points") or 0) for w in waiting)
-            lines.append(f"{user.get('name')}: {len(waiting)} chore{'s' if len(waiting) > 1 else ''} ({points} points)")
+            template = t.waiting_one if len(waiting) == 1 else t.waiting_many
+            lines.append(template.format(name=user.get("name"), count=len(waiting), points=points))
     return lines
 
 
