@@ -8,13 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # git keeps the vault's history (one commit per change).
+# The upgrade picks up Debian security fixes the base image doesn't have yet.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencies first (cached until pyproject.toml changes), then the code.
 COPY pyproject.toml README.md ./
 RUN mkdir -p src/home_brain && touch src/home_brain/__init__.py \
+    && pip install --root-user-action=ignore --upgrade pip \
     && pip install --root-user-action=ignore . \
     && pip uninstall --root-user-action=ignore -y home-brain \
     && rm -rf src
