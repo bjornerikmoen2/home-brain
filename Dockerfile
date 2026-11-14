@@ -17,12 +17,13 @@ RUN apt-get update \
 # Dependencies first (cached until pyproject.toml changes), then the code.
 COPY pyproject.toml README.md ./
 RUN mkdir -p src/home_brain && touch src/home_brain/__init__.py \
-    && pip install --root-user-action=ignore --upgrade pip \
     && pip install --root-user-action=ignore . \
     && pip uninstall --root-user-action=ignore -y home-brain \
     && rm -rf src
 COPY src ./src
-RUN pip install --root-user-action=ignore --no-deps .
+# pip isn't needed at runtime; removing it also drops the old setuptools code it bundles.
+RUN pip install --root-user-action=ignore --no-deps . \
+    && pip uninstall --root-user-action=ignore -y pip
 
 # UID/GID 1000 by default; override with `user:` in compose to match the NAS share owner.
 # /data is sticky world-writable so an overridden UID can still use a fresh data volume.
